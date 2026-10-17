@@ -5,7 +5,8 @@ import { checkPack, savePack, storedPack, toStored, type Files, type Who } from 
 import { deviceKey, isTauri, petEmit, petListen, setupMainWindow, quitApp } from './tauri';
 
 type Mode = 'server' | 'local';
-type Config = { server: string; wrapped: string; peppered: boolean; nick: string; mode: Mode; device: string };
+// hidePetText: show only 💬 over the pet instead of the message (set from the settings screen, #4).
+type Config = { server: string; wrapped: string; peppered: boolean; nick: string; mode: Mode; device: string; hidePetText?: boolean };
 // n: per-message nonce (replay detection + delivery receipt), at: sender clock. Both are absent in pre-receipt messages.
 type Payload = { v: 1; from: string; n?: string; at?: number } & (
   | { type: 'chat'; text: string }
@@ -198,9 +199,10 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   const list = $('#messages');
   list.append(row);
   list.scrollTop = list.scrollHeight;
-  // Only content-free signals go to the desktop pet so coworkers can't read over a shoulder.
+  // Chat text only travels to this app's own pet windows (a local Tauri event, never the network).
   if (live && p.type === 'action') petEmit({ type: 'action', kind: p.kind, from: mine ? 'me' : 'partner' });
-  else if (live && !mine && p.type === 'chat') petEmit({ type: 'chat', from: 'partner' });
+  else if (live && p.type === 'chat')
+    petEmit({ type: 'chat', from: mine ? 'me' : 'partner', ...(config!.hidePetText ? {} : { text: p.text }) });
   return p;
 }
 

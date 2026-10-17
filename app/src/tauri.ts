@@ -14,10 +14,13 @@ export async function deviceKey(create: boolean): Promise<Uint8Array<ArrayBuffer
   return new Uint8Array(await invoke<number[]>('device_key', { fresh }));
 }
 
-/** `from` says whose character acts; each pet window draws one side. `reload` means a pack changed. */
+/**
+ * `from` says whose character acts; each pet window draws one side. `reload` means a pack changed.
+ * `text` is absent when the user hides message text on the pet.
+ */
 export type PetEvent =
   | { type: 'reload' }
-  | { type: 'chat'; from: Who }
+  | { type: 'chat'; from: Who; text?: string }
   | { type: 'status'; emoji: string; from: Who }
   | { type: 'action'; kind: string; from: Who };
 
