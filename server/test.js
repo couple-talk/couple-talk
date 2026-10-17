@@ -72,45 +72,40 @@ try {
   // oversized frame must not take the relay down
   const big = new WebSocket(`ws://localhost:${PORT}`);
   await new Promise((r) => big.on('open', r));
-  big.send('x'.repeat(9 * 1024 * 1024));
+  big.send('x'.repeat(300 * 1024));
   await new Promise((r) => big.on('close', r));
   const alive = await client({ roomId: id(), token: id(), device: id() });
   assert.equal((await alive.next()).op, 'ready');
   alive.close();
 
-  // character packs: content-addressed, room-scoped, deleted after the partner fetches in local mode
+  // character packs: uploaded in ordered parts, content-addressed, room-scoped
   const sha = (s) => createHash('sha256').update(s).digest('base64url');
+  const PART = 192 * 1024;
+  const upload = (ws, hash, blob, parts = Math.ceil(blob.length / PART)) => {
+    for (let i = 0; i < parts; i++) ws.put({ op: 'put', hash, part: i, parts, data: blob.slice(i * PART, (i + 1) * PART) });
+  };
   const pa = await client({ ...room, device: id() });
   await pa.next();
-  const pack = 'P'.repeat(200 * 1024);
-  pa.put({ op: 'put', hash: id(), blob: pack });
+  const pack = 'P'.repeat(500 * 1024);
+  upload(pa, id(), pack);
   assert.equal((await pa.next()).error, 'bad request', 'hash must match blob');
-  pa.put({ op: 'put', hash: sha(pack), blob: pack });
+  upload(pa, sha(pack), pack);
   assert.deepEqual(await pa.next(), { op: 'stored', hash: sha(pack) });
-  pa.put({ op: 'send', blob: pack, receipt: receiptOf(id()) });
+  pa.put({ op: 'put', hash: sha(pack), part: 1, parts: 3, data: 'x' });
+  assert.deepEqual(await pa.next(), { op: 'error', error: 'bad request', hash: sha(pack) }, 'parts must start at 0');
+  pa.put({ op: 'send', blob: 'Q'.repeat(100 * 1024), receipt: receiptOf(id()) });
   assert.equal((await pa.next()).error, 'bad request', 'chat blobs stay small');
   const pb = await client({ ...room, device: id() });
   await pb.next();
   pb.put({ op: 'get', hash: sha(pack) });
   assert.equal((await pb.next()).blob, pack);
+  pb.put({ op: 'get', hash: sha(pack) });
+  assert.equal((await pb.next()).blob, pack, 'fetching again still works (other PCs, failed validation)');
   const other = await client({ roomId: id(), token: id(), device: id() });
   await other.next();
   other.put({ op: 'get', hash: sha(pack) });
   assert.equal((await other.next()).blob, null, 'packs are room-scoped');
-
-  const lpa = await client({ ...lroom, device: devA });
-  await lpa.next();
-  lpa.put({ op: 'put', hash: sha('LP'), blob: 'LP' });
-  await lpa.next();
-  lpa.put({ op: 'get', hash: sha('LP') });
-  assert.equal((await lpa.next()).blob, 'LP', "sender's own fetch keeps it");
-  const lpb = await client({ ...lroom, device: devB });
-  await lpb.next();
-  lpb.put({ op: 'get', hash: sha('LP') });
-  assert.equal((await lpb.next()).blob, 'LP');
-  lpb.put({ op: 'get', hash: sha('LP') });
-  assert.equal((await lpb.next()).blob, null);
-  for (const ws of [pa, pb, other, lpa, lpb]) ws.close();
+  for (const ws of [pa, pb, other]) ws.close();
 
   // per-socket send rate limit
   const spam = await client({ roomId: id(), token: id(), device: id() });
