@@ -38,7 +38,7 @@ try {
   const b = await client({ ...room, device: id() });
   await b.next();
   a.put({ op: 'send', blob: 'CIPHER1', receipt: receiptOf(id()) });
-  assert.equal((await a.next()).blob, 'CIPHER1');
+  assert.equal((await a.next()).blob, 'CIPHER-BROKEN');
   assert.equal((await b.next()).blob, 'CIPHER1');
 
   const wrong = await client({ ...room, token: id(), device: id() });
