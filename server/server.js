@@ -9,6 +9,10 @@ const LOCAL_TTL_MS = 7 * 24 * 3600 * 1000;
 const HISTORY_LIMIT = 500;
 const ID_RE = /^[A-Za-z0-9_-]{43}$/; // 32 bytes base64url
 const MSG_PER_MIN = 60;
+const BLOB_MAX = 64 * 1024;
+// Character packs are images, so they get their own larger cap and a small per-room store.
+const PACK_MAX = 8 * 1024 * 1024;
+const PACKS_PER_ROOM = 4;
 // ponytail: global cap on new rooms stops disk-filling spam but also blocks real sign-ups during an attack; per-IP limits need trusted proxy headers.
 const NEW_ROOMS_PER_HOUR = Number(process.env.NEW_ROOMS_PER_HOUR ?? 50);
 
@@ -19,6 +23,9 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, sender TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL,
     receipt TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS messages_room ON messages (room_id, id);
+  CREATE TABLE IF NOT EXISTS packs (
+    room_id TEXT NOT NULL, sender TEXT NOT NULL, hash TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL,
+    PRIMARY KEY (room_id, sender));
 `);
 // Databases created before delivery receipts: old rows get an unmatchable receipt and just expire.
 if (!db.prepare('PRAGMA table_info(messages)').all().some((c) => c.name === 'receipt'))
@@ -30,6 +37,11 @@ const q = {
   since: db.prepare('SELECT id, ts, blob FROM messages WHERE room_id = ? AND id > ? ORDER BY id DESC LIMIT ?'),
   pending: db.prepare('SELECT id, ts, blob FROM messages WHERE room_id = ? AND sender != ? ORDER BY id'),
   ack: db.prepare('DELETE FROM messages WHERE room_id = ? AND id = ? AND sender != ? AND receipt = ?'),
+  putPack: db.prepare('INSERT OR REPLACE INTO packs (room_id, sender, hash, ts, blob) VALUES (?, ?, ?, ?, ?)'),
+  prunePacks: db.prepare(`DELETE FROM packs WHERE room_id = ? AND rowid NOT IN
+    (SELECT rowid FROM packs WHERE room_id = ? ORDER BY ts DESC LIMIT ${PACKS_PER_ROOM})`),
+  getPack: db.prepare('SELECT sender, blob FROM packs WHERE room_id = ? AND hash = ?'),
+  delPack: db.prepare('DELETE FROM packs WHERE room_id = ? AND hash = ?'),
   expire: db.prepare(`DELETE FROM messages WHERE ts < ? AND room_id IN (SELECT id FROM rooms WHERE mode = 'local')`),
 };
 const expire = () => q.expire.run(Date.now() - LOCAL_TTL_MS);
@@ -62,23 +74,41 @@ function auth(ws, m) {
   ws.send(JSON.stringify({ op: 'ready', v: 1, mode: room.mode, items }));
 }
 
+function limited(ws) {
+  const now = Date.now();
+  if (now - (ws.windowStart ?? 0) > 60_000) Object.assign(ws, { windowStart: now, sent: 0 });
+  return ++ws.sent > MSG_PER_MIN;
+}
+
 function handle(ws, m) {
   if (!ws.roomId) return m.op === 'auth' ? auth(ws, m) : 'auth first';
   if (m.op === 'send') {
     // receipt = sha256 of a nonce sealed inside the blob; only someone who decrypted it can later prove delivery.
-    if (typeof m.blob !== 'string' || !ID_RE.test(m.receipt)) return 'bad request';
+    if (typeof m.blob !== 'string' || m.blob.length > BLOB_MAX || !ID_RE.test(m.receipt)) return 'bad request';
+    if (limited(ws)) return 'rate limited';
     const now = Date.now();
-    if (now - (ws.windowStart ?? 0) > 60_000) Object.assign(ws, { windowStart: now, sent: 0 });
-    if (++ws.sent > MSG_PER_MIN) return 'rate limited';
     const { id } = q.add.get(ws.roomId, ws.device, now, m.blob, m.receipt);
     const out = JSON.stringify({ op: 'msg', id, ts: now, blob: m.blob });
     for (const peer of rooms.get(ws.roomId)) peer.send(out);
+  } else if (m.op === 'put') {
+    // Content-addressed: the hash is checked here, so a client can't store a blob under someone else's hash.
+    if (typeof m.blob !== 'string' || m.blob.length > PACK_MAX || m.hash !== sha256b64(m.blob)) return 'bad request';
+    if (limited(ws)) return 'rate limited';
+    q.putPack.run(ws.roomId, ws.device, m.hash, Date.now(), m.blob);
+    q.prunePacks.run(ws.roomId, ws.roomId);
+    ws.send(JSON.stringify({ op: 'stored', hash: m.hash }));
+  } else if (m.op === 'get') {
+    if (!ID_RE.test(m.hash)) return 'bad request';
+    const row = q.getPack.get(ws.roomId, m.hash);
+    ws.send(JSON.stringify({ op: 'pack', hash: m.hash, blob: row?.blob ?? null }));
+    // local mode keeps nothing once the partner has it
+    if (row && ws.mode === 'local' && row.sender !== ws.device) q.delPack.run(ws.roomId, m.hash);
   } else if (m.op === 'ack') {
     if (ws.mode === 'local' && typeof m.receipt === 'string') q.ack.run(ws.roomId, Number(m.id) || 0, ws.device, sha256b64(m.receipt));
   } else return 'unknown op';
 }
 
-const wss = new WebSocketServer({ port: PORT, maxPayload: 64 * 1024 });
+const wss = new WebSocketServer({ port: PORT, maxPayload: PACK_MAX + 1024 });
 wss.on('error', console.error);
 // Cloudflare drops WebSockets idle for ~100s, and half-open sockets otherwise linger in `rooms`.
 setInterval(() => {

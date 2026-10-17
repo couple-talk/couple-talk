@@ -72,11 +72,45 @@ try {
   // oversized frame must not take the relay down
   const big = new WebSocket(`ws://localhost:${PORT}`);
   await new Promise((r) => big.on('open', r));
-  big.send('x'.repeat(70 * 1024));
+  big.send('x'.repeat(9 * 1024 * 1024));
   await new Promise((r) => big.on('close', r));
   const alive = await client({ roomId: id(), token: id(), device: id() });
   assert.equal((await alive.next()).op, 'ready');
   alive.close();
+
+  // character packs: content-addressed, room-scoped, deleted after the partner fetches in local mode
+  const sha = (s) => createHash('sha256').update(s).digest('base64url');
+  const pa = await client({ ...room, device: id() });
+  await pa.next();
+  const pack = 'P'.repeat(200 * 1024);
+  pa.put({ op: 'put', hash: id(), blob: pack });
+  assert.equal((await pa.next()).error, 'bad request', 'hash must match blob');
+  pa.put({ op: 'put', hash: sha(pack), blob: pack });
+  assert.deepEqual(await pa.next(), { op: 'stored', hash: sha(pack) });
+  pa.put({ op: 'send', blob: pack, receipt: receiptOf(id()) });
+  assert.equal((await pa.next()).error, 'bad request', 'chat blobs stay small');
+  const pb = await client({ ...room, device: id() });
+  await pb.next();
+  pb.put({ op: 'get', hash: sha(pack) });
+  assert.equal((await pb.next()).blob, pack);
+  const other = await client({ roomId: id(), token: id(), device: id() });
+  await other.next();
+  other.put({ op: 'get', hash: sha(pack) });
+  assert.equal((await other.next()).blob, null, 'packs are room-scoped');
+
+  const lpa = await client({ ...lroom, device: devA });
+  await lpa.next();
+  lpa.put({ op: 'put', hash: sha('LP'), blob: 'LP' });
+  await lpa.next();
+  lpa.put({ op: 'get', hash: sha('LP') });
+  assert.equal((await lpa.next()).blob, 'LP', "sender's own fetch keeps it");
+  const lpb = await client({ ...lroom, device: devB });
+  await lpb.next();
+  lpb.put({ op: 'get', hash: sha('LP') });
+  assert.equal((await lpb.next()).blob, 'LP');
+  lpb.put({ op: 'get', hash: sha('LP') });
+  assert.equal((await lpb.next()).blob, null);
+  for (const ws of [pa, pb, other, lpa, lpb]) ws.close();
 
   // per-socket send rate limit
   const spam = await client({ roomId: id(), token: id(), device: id() });
