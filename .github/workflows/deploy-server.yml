@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: 되돌릴 커밋 SHA (비우면 main 최신)
+        description: 되돌릴 main 커밋의 전체 40자 SHA (비우면 main 최신)
         required: false
 
 concurrency:
@@ -26,9 +26,24 @@ jobs:
       # Images stay on the Mac mini tagged by commit, so a rollback is a redeploy of an older tag.
       IMAGE_TAG: ${{ inputs.sha || github.sha }}
     steps:
+      # A branch name or short SHA would become an image tag that a later run silently reuses.
+      - name: require a full commit SHA
+        run: '[[ "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be a full 40-character commit SHA"; exit 1; }'
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.IMAGE_TAG }}
+          fetch-depth: 0 # origin/main history for the ancestry check below
+
+      - name: refuse targets off main or older than this workflow
+        working-directory: server
+        run: |
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$IMAGE_TAG is not on main"; exit 1
+          fi
+          if ! grep -q '^HEALTHCHECK' Dockerfile || ! grep -q 'IMAGE_TAG' docker-compose.yml; then
+            echo "::error::$IMAGE_TAG predates the health check and SHA image tags; deploy it by hand"; exit 1
+          fi
 
       - name: test
         working-directory: server
@@ -36,8 +51,9 @@ jobs:
 
       - name: build and replace
         working-directory: server
+        # Compose builds only when couple-talk-server:$IMAGE_TAG is missing, so a rollback reuses the kept image.
         # --wait returns only once the HEALTHCHECK passes; a failing image leaves the job red.
-        run: docker compose up -d --build --wait --wait-timeout 120
+        run: docker compose up -d --wait --wait-timeout 120
 
       - name: check through the tunnel
         run: curl -fsS --retry 5 --retry-delay 3 https://couple-talk.tpsg.co.kr/healthz

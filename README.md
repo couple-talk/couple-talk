@@ -53,7 +53,7 @@ TLS는 앞단에 둡니다. `server/Caddyfile`의 도메인을 바꾼 뒤 `caddy
 `wss://couple-talk.tpsg.co.kr`은 맥미니에서 `server/docker-compose.yml`로 떠 있고 Cloudflare 터널이 공개합니다.
 
 - **배포**: `server/`를 바꾼 PR이 `main`에 머지되면 맥미니 self-hosted runner(라벨 `couple-talk-macmini`)에서 `.github/workflows/deploy-server.yml`이 테스트, 이미지 빌드(커밋 SHA 태그), 교체, 터널 너머 `/healthz` 확인까지 합니다. 이미지는 최근 5개만 남깁니다.
-- **롤백**: Actions에서 `deploy server`를 수동 실행하고 `sha`에 되돌릴 커밋을 넣습니다.
+- **롤백**: Actions에서 `deploy server`를 수동 실행하고 `sha`에 되돌릴 `main` 커밋의 전체 40자 SHA를 넣습니다. 맥미니에 남아 있는 그 커밋의 이미지를 다시 띄우고, 없으면 빌드합니다. 헬스 체크와 SHA 태그가 생긴 커밋(이 배포 방식을 넣은 PR) 이전으로는 워크플로가 거부하므로 손으로 배포합니다. 이 워크플로는 맥미니 호스트에서 `npm test`를 돌리므로 Node 22.13 이상이 필요합니다.
 - **모니터링**: mac-infra의 Prometheus가 `couple-talk-server:9464/metrics`를 수집하고, 서버가 1분 넘게 응답하지 않으면 Alertmanager가 메일을 보냅니다.
 - **백업**: DB에는 암호문만 있습니다. 서버를 켠 채로 사본을 만들 수 있습니다.
 
