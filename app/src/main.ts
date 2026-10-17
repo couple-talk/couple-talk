@@ -30,7 +30,12 @@ function pairingCode(server: string, secret: Bytes, mode: Mode) {
 }
 
 async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: string, pin: string) {
-  if (pin.length < 4) throw new Error('PIN은 4자리 이상이어야 해요');
+  // The wrapped secret can be brute-forced offline by anyone who copies app storage, so short PINs are not enough.
+  if (pin.length < 8) throw new Error('잠금 비밀번호는 8자 이상이어야 해요');
+  let u: URL;
+  try { u = new URL(server); } catch { throw new Error('서버 주소 형식이 올바르지 않아요'); }
+  if (u.protocol !== 'wss:' && !(u.protocol === 'ws:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)))
+    throw new Error('서버 주소는 wss:// 로 시작해야 해요 (로컬 테스트만 ws:// 허용)');
   if (!nick.trim()) throw new Error('닉네임을 입력해 주세요');
   config = { server, wrapped: await wrapSecret(secret, pin), nick: nick.trim(), mode, device: randomId() };
   save('ct.config', config);
@@ -61,7 +66,7 @@ bindForm('#join-form', async (f) => {
 
 bindForm('#unlock-form', async (f) => {
   let secret: Bytes;
-  try { secret = await unwrapSecret(config!.wrapped, String(f.get('pin'))); } catch { throw new Error('PIN이 틀렸어요'); }
+  try { secret = await unwrapSecret(config!.wrapped, String(f.get('pin'))); } catch { throw new Error('비밀번호가 틀렸어요'); }
   await start(secret);
 });
 

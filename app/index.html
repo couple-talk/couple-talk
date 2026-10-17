@@ -20,7 +20,7 @@
           <label><input type="radio" name="mode" value="server" checked /> 서버 (암호문 보관, PC를 바꿔도 복원)</label>
           <label><input type="radio" name="mode" value="local" /> 각자 PC에만 (서버는 전달 후 삭제)</label>
         </fieldset>
-        <label>이 PC 잠금 PIN <input name="pin" type="password" required minlength="4" autocomplete="new-password" /></label>
+        <label>이 PC 잠금 비밀번호 (8자 이상) <input name="pin" type="password" required minlength="8" autocomplete="new-password" /></label>
         <button>방 만들기</button>
         <p class="error"></p>
       </form>
@@ -29,7 +29,7 @@
         <h2>상대 코드로 참여하기</h2>
         <label>페어링 코드 <input name="code" required autocomplete="off" /></label>
         <label>내 닉네임 <input name="nick" required maxlength="20" placeholder="상대와 다른 이름" /></label>
-        <label>이 PC 잠금 PIN <input name="pin" type="password" required minlength="4" autocomplete="new-password" /></label>
+        <label>이 PC 잠금 비밀번호 (8자 이상) <input name="pin" type="password" required minlength="8" autocomplete="new-password" /></label>
         <button>참여하기</button>
         <p class="error"></p>
       </form>
@@ -38,7 +38,7 @@
     <section id="unlock" class="screen" hidden>
       <form id="unlock-form" class="card">
         <h2>잠금 해제</h2>
-        <label>PIN <input name="pin" type="password" required autofocus autocomplete="current-password" /></label>
+        <label>잠금 비밀번호 <input name="pin" type="password" required autofocus autocomplete="current-password" /></label>
         <button>열기</button>
         <p class="error"></p>
       </form>
