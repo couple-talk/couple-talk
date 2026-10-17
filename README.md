@@ -73,10 +73,10 @@ cd app/src-tauri && cargo test --lib -- --ignored   # 실제 OS 키체인 저장
 
 ## 캐릭터 팩
 
-`app/public/characters/<이름>/`에 `manifest.json`과 이미지 파일을 둡니다.
+`app/public/characters/<이름>/`에 `manifest.json`과 포즈별 이미지를 둡니다. 팩은 포즈 그림만 주고 움직임과 효과는 앱이 그려서, ChatGPT 등으로 만든 캐릭터도 똑같이 움직입니다. 필수 포즈, 그림 규칙, 생성 프롬프트는 [docs/character-pack.md](docs/character-pack.md)에 있습니다.
 
-```json
-{ "v": 1, "name": "말랑이", "image": "body.svg", "speed": 2 }
+```sh
+cd app && npm run check:character -- public/characters/<이름>
 ```
 
 ## 라이선스
