@@ -14,6 +14,9 @@
       #bubble { position: absolute; left: 50%; top: -34px; transform: translateX(-50%); background: #fff; border-radius: 12px;
         padding: 2px 8px; font-size: 20px; box-shadow: 0 1px 4px #0003; opacity: 0; transition: opacity .2s; }
       #bubble.on { opacity: 1; }
+      #tag { position: absolute; left: 50%; bottom: 1px; translate: -50% 0; max-width: 110px; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap; font: 600 11px system-ui, sans-serif; color: #2b2124; background: #fffd; border-radius: 8px; padding: 0 6px; }
+      #tag:empty { display: none; }
       .jump #body { animation: jump .35s ease-out 3 !important; }
       .shake #body { animation: shake .1s linear 8 !important; }
       .squish #body { animation: squish .5s ease-in-out 3 !important; }
@@ -33,6 +36,7 @@
       <img id="body" alt="" draggable="false" />
       <span id="status"></span>
       <span id="bubble"></span>
+      <span id="tag"></span>
     </div>
   </body>
 </html>

@@ -44,6 +44,7 @@ async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: stri
   const pepper = await loadDeviceKey(true);
   config = { server, wrapped: await wrapSecret(secret, pin, pepper), peppered: !!pepper, nick: nick.trim(), mode, device: randomId() };
   save('ct.config', config);
+  petEmit({ type: 'reload' }); // the pet shows my nickname
   await start(secret);
 }
 
@@ -96,6 +97,7 @@ $('#reset').onclick = (e) => {
   if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = '정말 지울까요? 한 번 더 누르세요'; return; }
   localStorage.removeItem('ct.config');
   localStorage.removeItem('ct.history');
+  localStorage.removeItem('ct.partner');
   indexedDB.deleteDatabase('ct-packs');
   location.reload();
 };
@@ -172,6 +174,8 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
     seenNonces.add(p.n);
   }
   const mine = p.from === config!.nick;
+  // The partner's pet appears (with this name) once we've heard from them.
+  if (!mine && load<string | null>('ct.partner', null) !== p.from) { save('ct.partner', p.from); petEmit({ type: 'reload' }); }
   const time = new Date(p.at ?? it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const row = document.createElement('div');
 

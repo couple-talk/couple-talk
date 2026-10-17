@@ -138,10 +138,10 @@ export async function toStored(hash: string, manifest: Manifest, files: Files): 
 export const BUILTIN = 'default';
 
 /** What a pet window draws: the stored pack for `who`, or the built-in character. */
-export async function loadPack(who: Who): Promise<{ manifest: Manifest; url: (file: string) => string }> {
+export async function loadPack(who: Who): Promise<{ manifest: Manifest; url: (file: string) => string; builtin: boolean }> {
   const p = await storedPack(who).catch(() => undefined);
-  if (p) return { manifest: p.manifest, url: (f) => p.files[f] };
+  if (p) return { manifest: p.manifest, url: (f) => p.files[f], builtin: false };
   const base = `/characters/${BUILTIN}/`;
   const manifest: Manifest = await (await fetch(base + 'manifest.json')).json();
-  return { manifest, url: (f) => base + f };
+  return { manifest, url: (f) => base + f, builtin: true };
 }

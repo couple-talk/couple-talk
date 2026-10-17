@@ -27,9 +27,22 @@ const bubble = document.getElementById('bubble')!;
 const win = getCurrentWindow();
 const who: Who = win.label === 'pet-me' ? 'me' : 'partner';
 
-let { manifest, url } = await loadPack(who);
+let { manifest, url, builtin } = await loadPack(who);
 const preload = () => { for (const f of Object.values(manifest.poses).flat()) new Image().src = url(f); };
 preload();
+
+// Both sides start as the built-in character, so the partner's copy is tinted and each pet wears a name tag.
+// The partner's window stays hidden until we know there is a partner (their first message).
+const stored = (k: string) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null'); } catch { return null; } };
+let shown = true; // windows start visible (tauri.conf.json)
+async function showIdentity() {
+  const name: string | null = who === 'me' ? stored('ct.config')?.nick ?? null : stored('ct.partner');
+  document.getElementById('tag')!.textContent = name ?? (who === 'me' ? '나' : '');
+  body.style.filter = who === 'partner' && builtin ? 'hue-rotate(190deg)' : '';
+  // show() can take focus on macOS, so only toggle on an actual change.
+  if (who === 'partner' && shown !== !!name) { shown = !!name; await (shown ? win.show() : win.hide()); }
+}
+await showIdentity();
 
 let pose = '';
 let frame = 0;
@@ -51,7 +64,12 @@ const area = monitor!.workArea;
 const scale = monitor!.scaleFactor;
 const winW = 120 * scale;
 const y = area.position.y + area.size.height - 130 * scale;
-let x = area.position.x + area.size.width - winW - (who === 'me' ? 200 : 40) * scale;
+// The two windows can't see each other's position, so each walks its own half and they never overlap.
+const mid = area.position.x + area.size.width / 2;
+const gap = 20 * scale;
+const min = who === 'me' ? area.position.x : mid + gap;
+const max = who === 'me' ? mid - gap - winW : area.position.x + area.size.width - winW;
+let x = max - 40 * scale;
 let dir = -1;
 let pauseUntil = 0;
 let reactPose = '';
@@ -69,7 +87,6 @@ setInterval(() => {
   if (Math.random() < 0.005) { pauseUntil = now + 2000 + Math.random() * 6000; return; }
   if (Math.random() < 0.003) dir = -dir;
   x += dir * manifest.speed * scale;
-  const min = area.position.x, max = area.position.x + area.size.width - winW;
   if (x <= min || x >= max) { dir = -dir; x = Math.min(Math.max(x, min), max); }
   pet.classList.toggle('left', dir < 0);
   win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
@@ -108,9 +125,10 @@ function react(r: Reaction) {
 
 await listen<PetEvent>('pet', async ({ payload: e }) => {
   if (e.type === 'reload') {
-    ({ manifest, url } = await loadPack(who));
+    ({ manifest, url, builtin } = await loadPack(who));
     preload();
     draw();
+    await showIdentity();
     return;
   }
   if (e.from !== who && e.type !== 'action') return;
