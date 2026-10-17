@@ -1,6 +1,7 @@
 // Run: node scripts/crypto-check.ts
 import assert from 'node:assert/strict';
-import { deriveRoom, open, seal, unwrapSecret, wrapSecret } from '../src/crypto.ts';
+import { createHash } from 'node:crypto';
+import { deriveRoom, open, randomId, receiptOf, seal, unwrapSecret, wrapSecret } from '../src/crypto.ts';
 
 const secret = crypto.getRandomValues(new Uint8Array(32));
 const a = await deriveRoom(secret);
@@ -21,5 +22,8 @@ await assert.rejects(open(other.key, blob));
 const wrapped = await wrapSecret(secret, '1234');
 assert.deepEqual(await unwrapSecret(wrapped, '1234'), secret);
 await assert.rejects(unwrapSecret(wrapped, '0000'));
+
+const nonce = randomId();
+assert.equal(await receiptOf(nonce), createHash('sha256').update(nonce).digest('base64url'));
 
 console.log('crypto ok');

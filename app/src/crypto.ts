@@ -17,6 +17,10 @@ const concat = (a: Uint8Array, b: ArrayBuffer) => {
   return out;
 };
 
+/** Must match the relay's sha256(base64url) check in server.js. */
+export const receiptOf = async (nonce: string) =>
+  b64(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(nonce))));
+
 export type Room = { roomId: string; token: string; key: CryptoKey };
 
 export async function deriveRoom(secret: Bytes): Promise<Room> {

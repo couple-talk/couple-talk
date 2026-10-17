@@ -1,14 +1,15 @@
 import './style.css';
-import { b64, deriveRoom, open, randomId, seal, unb64, unwrapSecret, wrapSecret, type Bytes, type Room } from './crypto';
+import { b64, deriveRoom, open, randomId, receiptOf, seal, unb64, unwrapSecret, wrapSecret, type Bytes, type Room } from './crypto';
 import { connect, type Item } from './net';
 import { isTauri, petEmit, petListen, setupMainWindow, quitApp } from './tauri';
 
 type Mode = 'server' | 'local';
 type Config = { server: string; wrapped: string; nick: string; mode: Mode; device: string };
-type Payload =
-  | { v: 1; from: string; type: 'chat'; text: string }
-  | { v: 1; from: string; type: 'status'; emoji: string; text: string }
-  | { v: 1; from: string; type: 'action'; kind: keyof typeof ACTIONS };
+// n: per-message nonce (replay detection + delivery receipt), at: sender clock
+type Payload = { v: 1; from: string; n: string; at: number } & (
+  | { type: 'chat'; text: string }
+  | { type: 'status'; emoji: string; text: string }
+  | { type: 'action'; kind: keyof typeof ACTIONS });
 
 const DEFAULT_SERVER = import.meta.env.VITE_DEFAULT_SERVER ?? 'ws://localhost:8080';
 const STATUSES = [['💻', '일하는 중'], ['🍚', '밥 먹는 중'], ['☕', '쉬는 중'], ['🔥', '바빠요'], ['🏃', '퇴근!']];
@@ -86,6 +87,7 @@ let secretBytes: Bytes;
 let lastId = 0;
 let partnerStatus = '';
 const seen = new Set<number>();
+const seenNonces = new Set<string>();
 let net: ReturnType<typeof connect>;
 
 function showCode() {
@@ -119,29 +121,33 @@ async function receive(it: Item, live: boolean, mode: Mode) {
     const hist = load<Item[]>('ct.history', []);
     hist.push(it);
     save('ct.history', hist.slice(-LOCAL_HISTORY_MAX));
-    net.ack(it.id);
   }
-  await render(it, live);
+  const p = await render(it, live);
+  if (mode === 'local' && p && p.from !== config!.nick) net.ack(it.id, p.n);
 }
 
 // A decrypted payload still comes from the partner's client; a bad one must not break rendering forever.
 function isValid(p: unknown): p is Payload {
   const o = p as Record<string, unknown> | null;
-  if (!o || typeof o !== 'object' || typeof o.from !== 'string') return false;
+  if (!o || typeof o !== 'object' || typeof o.from !== 'string' || typeof o.n !== 'string' || typeof o.at !== 'number') return false;
   if (o.type === 'chat') return typeof o.text === 'string';
   if (o.type === 'status') return typeof o.emoji === 'string' && typeof o.text === 'string';
   return o.type === 'action' && typeof o.kind === 'string' && Object.hasOwn(ACTIONS, o.kind);
 }
 
-async function render(it: Item, live: boolean) {
-  if (seen.has(it.id)) return;
+/** Returns the payload (even for a replayed copy, so it can still be acked) or null if unreadable. */
+async function render(it: Item, live: boolean): Promise<Payload | null> {
+  if (seen.has(it.id)) return null;
   seen.add(it.id);
   lastId = Math.max(lastId, it.id);
   let p: Payload;
-  try { p = await open<Payload>(room.key, it.blob); } catch { return; }
-  if (!isValid(p)) return;
+  try { p = await open<Payload>(room.key, it.blob); } catch { return null; }
+  if (!isValid(p)) return null;
+  // A relay can re-send an old blob under a new id; the sealed nonce exposes that.
+  if (seenNonces.has(p.n)) return p;
+  seenNonces.add(p.n);
   const mine = p.from === config!.nick;
-  const time = new Date(it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = new Date(p.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const row = document.createElement('div');
 
   if (p.type === 'chat') {
@@ -166,10 +172,12 @@ async function render(it: Item, live: boolean) {
   list.scrollTop = list.scrollHeight;
   // Only content-free signals go to the desktop pet so coworkers can't read over a shoulder.
   if (live && !mine && p.type !== 'status') petEmit(p.type === 'action' ? { type: 'action', kind: p.kind } : { type: 'chat' });
+  return p;
 }
 
 async function sendPayload(p: Record<string, unknown>) {
-  const ok = net.send(await seal(room.key, { v: 1, from: config!.nick, ...p }));
+  const n = randomId();
+  const ok = net.send(await seal(room.key, { v: 1, from: config!.nick, n, at: Date.now(), ...p }), await receiptOf(n));
   $('#send-error').textContent = ok ? '' : '연결이 끊겨 있어요. 잠시 후 다시 보내 주세요.';
   return ok;
 }

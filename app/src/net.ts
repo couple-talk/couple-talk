@@ -23,7 +23,7 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
   open();
   const send = (m: object) => ws.readyState === WebSocket.OPEN && (ws.send(JSON.stringify(m)), true);
   return {
-    send: (blob: string) => send({ op: 'send', blob }),
-    ack: (id: number) => send({ op: 'ack', id }),
+    send: (blob: string, receipt: string) => send({ op: 'send', blob, receipt }),
+    ack: (id: number, receipt: string) => send({ op: 'ack', id, receipt }),
   };
 }
