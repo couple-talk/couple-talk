@@ -1,5 +1,5 @@
 import { emit, listen } from '@tauri-apps/api/event';
-import { currentMonitor, getCurrentWindow, PhysicalPosition, Window } from '@tauri-apps/api/window';
+import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition, Window } from '@tauri-apps/api/window';
 import { loadPack, type Who } from './pack';
 import type { PetEvent } from './tauri';
 
@@ -46,13 +46,27 @@ setInterval(() => {
 }, 1000 / manifest.fps);
 
 // Walk the window itself along the bottom of the work area, so no click-through handling is needed.
+// The window stays small and only grows upward while a speech bubble is up, so it rarely blocks clicks.
+const SMALL = { w: 120, h: 130 };
+const SAY = { w: 220, h: 220 };
 const monitor = await currentMonitor();
 const area = monitor!.workArea;
 const scale = monitor!.scaleFactor;
-const winW = 120 * scale;
-const y = area.position.y + area.size.height - 130 * scale;
-let x = area.position.x + area.size.width - winW - (who === 'me' ? 200 : 40) * scale;
+const bottom = area.position.y + area.size.height;
+let size = SMALL;
+// x is the character's center, so resizing the window around it doesn't move the character.
+let x = area.position.x + area.size.width - (60 + (who === 'me' ? 200 : 40)) * scale;
 let dir = -1;
+const half = () => (size.w * scale) / 2;
+const place = () => win.setPosition(new PhysicalPosition(Math.round(x - half()), Math.round(bottom - size.h * scale)));
+async function resize(next: typeof SMALL) {
+  if (next === size) return;
+  size = next;
+  // Keep a grown window on screen so the bubble isn't cut at the edges.
+  x = Math.min(Math.max(x, area.position.x + half()), area.position.x + area.size.width - half());
+  await win.setSize(new LogicalSize(size.w, size.h));
+  await place();
+}
 let pauseUntil = 0;
 let reactPose = '';
 let reactUntil = 0;
@@ -69,12 +83,12 @@ setInterval(() => {
   if (Math.random() < 0.005) { pauseUntil = now + 2000 + Math.random() * 6000; return; }
   if (Math.random() < 0.003) dir = -dir;
   x += dir * manifest.speed * scale;
-  const min = area.position.x, max = area.position.x + area.size.width - winW;
+  const min = area.position.x + half(), max = area.position.x + area.size.width - half();
   if (x <= min || x >= max) { dir = -dir; x = Math.min(Math.max(x, min), max); }
   pet.classList.toggle('left', dir < 0);
-  win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
+  place();
 }, 50);
-win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
+place();
 
 function heart(cls: string, left: number, top: number, delay: number, dx = 0) {
   const h = document.createElement('span');
@@ -102,6 +116,7 @@ function react(r: Reaction, say?: string) {
   reactPose = r.pose;
   reactUntil = Date.now() + REACT_MS;
   const text = say ? clip(say) : '';
+  resize(text ? SAY : SMALL);
   bubble.textContent = text || r.emoji || '';
   bubble.classList.toggle('on', !!(text || r.emoji));
   bubble.classList.toggle('say', !!text);
@@ -115,7 +130,12 @@ function react(r: Reaction, say?: string) {
   }
   clearTimeout(bubbleTimer);
   const ms = text ? Math.min(8000, 3000 + 100 * text.length) : REACT_MS;
-  bubbleTimer = window.setTimeout(() => { bubble.classList.remove('on'); pet.classList.remove(r.anim); }, ms);
+  bubbleTimer = window.setTimeout(() => {
+    bubble.classList.remove('on');
+    pet.classList.remove(r.anim);
+    // Shrink only after the fade-out so the bubble isn't cut mid-transition.
+    if (text) setTimeout(() => !bubble.classList.contains('on') && resize(SMALL), 250);
+  }, ms);
 }
 
 await listen<PetEvent>('pet', async ({ payload: e }) => {
