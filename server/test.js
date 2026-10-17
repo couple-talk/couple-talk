@@ -2,14 +2,19 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import WebSocket from 'ws';
 
 const PORT = 18080;
+const DB_PATH = join(mkdtempSync(join(tmpdir(), 'ct-')), 'test.db');
+// start from the pre-receipt schema to cover the migration
+new DatabaseSync(DB_PATH).exec(`CREATE TABLE messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, sender TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL)`);
 const srv = spawn('node', ['server.js'], {
-  env: { ...process.env, PORT, DB_PATH: join(mkdtempSync(join(tmpdir(), 'ct-')), 'test.db') },
+  env: { ...process.env, PORT, DB_PATH },
   stdio: 'inherit',
 });
 await new Promise((r) => setTimeout(r, 500));

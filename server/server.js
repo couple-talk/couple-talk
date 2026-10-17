@@ -20,6 +20,9 @@ db.exec(`
     receipt TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS messages_room ON messages (room_id, id);
 `);
+// Databases created before delivery receipts: old rows get an unmatchable receipt and just expire.
+if (!db.prepare('PRAGMA table_info(messages)').all().some((c) => c.name === 'receipt'))
+  db.exec(`ALTER TABLE messages ADD COLUMN receipt TEXT NOT NULL DEFAULT ''`);
 const q = {
   room: db.prepare('SELECT token_hash, mode FROM rooms WHERE id = ?'),
   addRoom: db.prepare('INSERT INTO rooms (id, token_hash, mode) VALUES (?, ?, ?)'),
