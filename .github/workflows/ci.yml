@@ -48,3 +48,32 @@ jobs:
         run: npm run check
       - name: Typecheck
         run: npx tsc --noEmit
+
+  tauri-build:
+    name: tauri-build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # let Windows report even when macOS fails, and vice versa
+      matrix:
+        include:
+          - platform: macos
+            os: macos-latest
+          - platform: windows
+            os: windows-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+      - run: npm ci
+      # Compile only: no installer, so no signing or bundling tools are needed.
+      - run: npx tauri build --debug --no-bundle
