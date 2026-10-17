@@ -1,43 +1,75 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri App</title>
-    <script type="module" src="/src/main.ts" defer></script>
+    <title>couple-talk</title>
+    <script type="module" src="/src/main.ts"></script>
   </head>
-
   <body>
-    <main class="container">
-      <h1>Welcome to Tauri</h1>
+    <section id="setup" class="screen" hidden>
+      <h1>couple-talk</h1>
+      <p class="hint">대화는 이 PC에서 암호화돼서 나가요. 서버도 회사 네트워크도 내용을 읽을 수 없어요.</p>
 
-      <div class="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/src/assets/vite.svg" class="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img
-            src="/src/assets/tauri.svg"
-            class="logo tauri"
-            alt="Tauri logo"
-          />
-        </a>
-        <a href="https://www.typescriptlang.org/docs" target="_blank">
-          <img
-            src="/src/assets/typescript.svg"
-            class="logo typescript"
-            alt="typescript logo"
-          />
-        </a>
-      </div>
-      <p>Click on the Tauri logo to learn more about the framework</p>
-
-      <form class="row" id="greet-form">
-        <input id="greet-input" placeholder="Enter a name..." />
-        <button type="submit">Greet</button>
+      <form id="create-form" class="card">
+        <h2>처음 시작하기</h2>
+        <label>서버 주소 <input name="server" required placeholder="wss://example.com" /></label>
+        <label>내 닉네임 <input name="nick" required maxlength="20" placeholder="상대와 다른 이름" /></label>
+        <fieldset>
+          <legend>대화 기록 저장 위치</legend>
+          <label><input type="radio" name="mode" value="server" checked /> 서버 (암호문 보관, PC를 바꿔도 복원)</label>
+          <label><input type="radio" name="mode" value="local" /> 각자 PC에만 (서버는 전달 후 삭제)</label>
+        </fieldset>
+        <label>이 PC 잠금 PIN <input name="pin" type="password" required minlength="4" autocomplete="new-password" /></label>
+        <button>방 만들기</button>
+        <p class="error"></p>
       </form>
-      <p id="greet-msg"></p>
-    </main>
+
+      <form id="join-form" class="card">
+        <h2>상대 코드로 참여하기</h2>
+        <label>페어링 코드 <input name="code" required autocomplete="off" /></label>
+        <label>내 닉네임 <input name="nick" required maxlength="20" placeholder="상대와 다른 이름" /></label>
+        <label>이 PC 잠금 PIN <input name="pin" type="password" required minlength="4" autocomplete="new-password" /></label>
+        <button>참여하기</button>
+        <p class="error"></p>
+      </form>
+    </section>
+
+    <section id="unlock" class="screen" hidden>
+      <form id="unlock-form" class="card">
+        <h2>잠금 해제</h2>
+        <label>PIN <input name="pin" type="password" required autofocus autocomplete="current-password" /></label>
+        <button>열기</button>
+        <p class="error"></p>
+      </form>
+      <button id="reset" class="link">이 PC에서 초기화</button>
+    </section>
+
+    <section id="chat" class="screen" hidden>
+      <header>
+        <span id="conn" class="off" title="연결 중…"></span>
+        <span id="partner">상대 상태 없음</span>
+        <button id="show-code" class="link" title="새 PC나 상대에게 줄 코드">코드</button>
+        <button id="quit" class="link">종료</button>
+      </header>
+      <div id="messages"></div>
+      <div id="statuses" class="chips"></div>
+      <div id="actions" class="chips"></div>
+      <form id="send-form">
+        <input id="text" autocomplete="off" placeholder="메시지" />
+        <button>보내기</button>
+      </form>
+      <p id="send-error" class="error"></p>
+      <footer>나: <span id="me"></span></footer>
+    </section>
+
+    <dialog id="code-dialog">
+      <p>이 코드를 <b>회사 메신저·메일이 아닌 방법</b>(직접 말하기, 개인 폰)으로 전달하세요. 코드를 아는 사람은 대화를 읽을 수 있어요.</p>
+      <code id="code"></code>
+      <form method="dialog">
+        <button type="button" id="copy-code">복사</button>
+        <button>닫기</button>
+      </form>
+    </dialog>
   </body>
 </html>
