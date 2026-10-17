@@ -16,6 +16,9 @@ assert.ok(!blob.includes('사랑해'));
 assert.deepEqual(await open(b.key, blob), msg);
 assert.notEqual(blob, await seal(a.key, msg), 'IV must be random');
 
+const big = { data: 'x'.repeat(5 * 1024 * 1024) };
+assert.deepEqual(await open(a.key, await seal(a.key, big)), big, 'pack-sized payloads must round-trip');
+
 const other = await deriveRoom(crypto.getRandomValues(new Uint8Array(32)));
 await assert.rejects(open(other.key, blob));
 

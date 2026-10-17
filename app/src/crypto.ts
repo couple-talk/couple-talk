@@ -4,8 +4,12 @@ const dec = new TextDecoder();
 export type Bytes = Uint8Array<ArrayBuffer>;
 const BLOB_PREFIX = '1.';
 
-export const b64 = (b: Uint8Array) =>
-  btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+export const b64 = (b: Uint8Array) => {
+  let s = '';
+  // Spreading a multi-MB array (character packs) into fromCharCode overflows the call stack.
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
 export const unb64 = (s: string) =>
   Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 export const randomId = () => b64(crypto.getRandomValues(new Uint8Array(32)));
