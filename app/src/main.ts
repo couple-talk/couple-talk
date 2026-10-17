@@ -5,8 +5,8 @@ import { deviceKey, isTauri, petEmit, petListen, setupMainWindow, quitApp } from
 
 type Mode = 'server' | 'local';
 type Config = { server: string; wrapped: string; peppered: boolean; nick: string; mode: Mode; device: string };
-// n: per-message nonce (replay detection + delivery receipt), at: sender clock
-type Payload = { v: 1; from: string; n: string; at: number } & (
+// n: per-message nonce (replay detection + delivery receipt), at: sender clock. Both are absent in pre-receipt messages.
+type Payload = { v: 1; from: string; n?: string; at?: number } & (
   | { type: 'chat'; text: string }
   | { type: 'status'; emoji: string; text: string }
   | { type: 'action'; kind: keyof typeof ACTIONS });
@@ -139,13 +139,14 @@ async function receive(it: Item, live: boolean, mode: Mode) {
     save('ct.history', hist.slice(-LOCAL_HISTORY_MAX));
   }
   const p = await render(it, live);
-  if (mode === 'local' && p && p.from !== config!.nick) net.ack(it.id, p.n);
+  if (mode === 'local' && p?.n && p.from !== config!.nick) net.ack(it.id, p.n);
 }
 
 // A decrypted payload still comes from the partner's client; a bad one must not break rendering forever.
 function isValid(p: unknown): p is Payload {
   const o = p as Record<string, unknown> | null;
-  if (!o || typeof o !== 'object' || typeof o.from !== 'string' || typeof o.n !== 'string' || typeof o.at !== 'number') return false;
+  if (!o || typeof o !== 'object' || typeof o.from !== 'string') return false;
+  if ((o.n !== undefined && typeof o.n !== 'string') || (o.at !== undefined && typeof o.at !== 'number')) return false;
   if (o.type === 'chat') return typeof o.text === 'string';
   if (o.type === 'status') return typeof o.emoji === 'string' && typeof o.text === 'string';
   return o.type === 'action' && typeof o.kind === 'string' && Object.hasOwn(ACTIONS, o.kind);
@@ -160,10 +161,12 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   try { p = await open<Payload>(room.key, it.blob); } catch { return null; }
   if (!isValid(p)) return null;
   // A relay can re-send an old blob under a new id; the sealed nonce exposes that.
-  if (seenNonces.has(p.n)) return p;
-  seenNonces.add(p.n);
+  if (p.n) {
+    if (seenNonces.has(p.n)) return p;
+    seenNonces.add(p.n);
+  }
   const mine = p.from === config!.nick;
-  const time = new Date(p.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = new Date(p.at ?? it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const row = document.createElement('div');
 
   if (p.type === 'chat') {
