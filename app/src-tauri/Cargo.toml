@@ -1,8 +1,8 @@
 [package]
-name = "app"
+name = "couple-talk"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "End-to-end encrypted couple messenger with a desktop pet"
+license = "AGPL-3.0-only"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -18,10 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+tauri = { version = "2", features = ["macos-private-api"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
