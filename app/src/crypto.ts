@@ -1,6 +1,7 @@
 // All crypto is WebCrypto. The server only ever sees roomId, token and blobs.
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+export type Bytes = Uint8Array<ArrayBuffer>;
 const BLOB_PREFIX = '1.';
 
 export const b64 = (b: Uint8Array) =>
@@ -18,7 +19,7 @@ const concat = (a: Uint8Array, b: ArrayBuffer) => {
 
 export type Room = { roomId: string; token: string; key: CryptoKey };
 
-export async function deriveRoom(secret: Uint8Array): Promise<Room> {
+export async function deriveRoom(secret: Bytes): Promise<Room> {
   const base = await crypto.subtle.importKey('raw', secret, 'HKDF', false, ['deriveBits', 'deriveKey']);
   const hkdf = (label: string) => ({
     name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: enc.encode(`couple-talk/v1/${label}`),
@@ -44,7 +45,7 @@ export async function open<T>(key: CryptoKey, blob: string): Promise<T> {
   return JSON.parse(dec.decode(pt));
 }
 
-async function pinKey(pin: string, salt: Uint8Array) {
+async function pinKey(pin: string, salt: Bytes) {
   const base = await crypto.subtle.importKey('raw', enc.encode(pin), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
     { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 600_000 },
@@ -52,7 +53,7 @@ async function pinKey(pin: string, salt: Uint8Array) {
   );
 }
 
-export async function wrapSecret(secret: Uint8Array, pin: string): Promise<string> {
+export async function wrapSecret(secret: Bytes, pin: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await pinKey(pin, salt), secret);
@@ -60,7 +61,7 @@ export async function wrapSecret(secret: Uint8Array, pin: string): Promise<strin
 }
 
 /** Throws on a wrong PIN (AES-GCM auth failure). */
-export async function unwrapSecret(wrapped: string, pin: string): Promise<Uint8Array> {
+export async function unwrapSecret(wrapped: string, pin: string): Promise<Bytes> {
   const raw = unb64(wrapped);
   const key = await pinKey(pin, raw.slice(0, 16));
   return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(16, 28) }, key, raw.slice(28)));
