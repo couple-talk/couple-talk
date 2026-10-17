@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import WebSocket from 'ws';
 
 const PORT = 18080;
@@ -15,6 +15,7 @@ const srv = spawn('node', ['server.js'], {
 await new Promise((r) => setTimeout(r, 500));
 
 const id = () => randomBytes(32).toString('base64url');
+const receiptOf = (n) => createHash('sha256').update(n).digest('base64url');
 function client(auth) {
   const ws = new WebSocket(`ws://localhost:${PORT}`);
   const queue = [], waiters = [];
@@ -31,7 +32,7 @@ try {
   assert.deepEqual((await a.next()).items, []);
   const b = await client({ ...room, device: id() });
   await b.next();
-  a.put({ op: 'send', blob: 'CIPHER1' });
+  a.put({ op: 'send', blob: 'CIPHER1', receipt: receiptOf(id()) });
   assert.equal((await a.next()).blob, 'CIPHER1');
   assert.equal((await b.next()).blob, 'CIPHER1');
 
@@ -46,13 +47,19 @@ try {
   const devA = id(), devB = id();
   const la = await client({ ...lroom, device: devA });
   assert.equal((await la.next()).mode, 'local');
-  la.put({ op: 'send', blob: 'L1' });
-  await la.next();
-  la.put({ op: 'ack', id: 999 }); // sender's own ack must not delete
+  const nonce = id();
+  la.put({ op: 'send', blob: 'L1', receipt: receiptOf(nonce) });
+  const sent = await la.next();
+  la.put({ op: 'ack', id: sent.id, receipt: nonce }); // sender's own ack must not delete
+  // someone holding only the token (e.g. a TLS-inspecting proxy) can't forge the receipt
+  const intruder = await client({ ...lroom, device: id() });
+  await intruder.next();
+  intruder.put({ op: 'ack', id: sent.id, receipt: id() });
+  await new Promise((r) => setTimeout(r, 100));
   const lb = await client({ ...lroom, device: devB });
   const pending = (await lb.next()).items;
   assert.deepEqual(pending.map((m) => m.blob), ['L1']);
-  lb.put({ op: 'ack', id: pending[0].id });
+  lb.put({ op: 'ack', id: pending[0].id, receipt: nonce });
   await new Promise((r) => setTimeout(r, 100));
   const lb2 = await client({ ...lroom, device: devB });
   assert.deepEqual((await lb2.next()).items, []);
@@ -69,14 +76,14 @@ try {
   // per-socket send rate limit
   const spam = await client({ roomId: id(), token: id(), device: id() });
   await spam.next();
-  for (let i = 0; i < 61; i++) spam.put({ op: 'send', blob: 'S' });
+  for (let i = 0; i < 61; i++) spam.put({ op: 'send', blob: 'S', receipt: receiptOf(id()) });
   const replies = [];
   for (let i = 0; i < 61; i++) replies.push(await spam.next());
   assert.equal(replies.at(-1).error, 'rate limited');
   spam.close();
 
   console.log('server ok');
-  for (const ws of [a, b, c, la, lb, lb2]) ws.close();
+  for (const ws of [a, b, c, la, intruder, lb, lb2]) ws.close();
 } finally {
   srv.kill();
 }

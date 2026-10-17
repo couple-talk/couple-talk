@@ -16,16 +16,17 @@ const db = new DatabaseSync(DB_PATH);
 db.exec(`
   CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY, token_hash BLOB NOT NULL, mode TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, sender TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL);
+    id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, sender TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL,
+    receipt TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS messages_room ON messages (room_id, id);
 `);
 const q = {
   room: db.prepare('SELECT token_hash, mode FROM rooms WHERE id = ?'),
   addRoom: db.prepare('INSERT INTO rooms (id, token_hash, mode) VALUES (?, ?, ?)'),
-  add: db.prepare('INSERT INTO messages (room_id, sender, ts, blob) VALUES (?, ?, ?, ?) RETURNING id'),
+  add: db.prepare('INSERT INTO messages (room_id, sender, ts, blob, receipt) VALUES (?, ?, ?, ?, ?) RETURNING id'),
   since: db.prepare('SELECT id, ts, blob FROM messages WHERE room_id = ? AND id > ? ORDER BY id DESC LIMIT ?'),
   pending: db.prepare('SELECT id, ts, blob FROM messages WHERE room_id = ? AND sender != ? ORDER BY id'),
-  ack: db.prepare('DELETE FROM messages WHERE room_id = ? AND id <= ? AND sender != ?'),
+  ack: db.prepare('DELETE FROM messages WHERE room_id = ? AND id = ? AND sender != ? AND receipt = ?'),
   expire: db.prepare(`DELETE FROM messages WHERE ts < ? AND room_id IN (SELECT id FROM rooms WHERE mode = 'local')`),
 };
 const expire = () => q.expire.run(Date.now() - LOCAL_TTL_MS);
@@ -33,6 +34,7 @@ expire();
 setInterval(expire, 3600 * 1000).unref();
 
 const sha256 = (s) => createHash('sha256').update(s).digest();
+const sha256b64 = (s) => sha256(s).toString('base64url');
 const rooms = new Map(); // roomId -> Set<ws>
 let newRooms = 0;
 setInterval(() => { newRooms = 0; }, 3600 * 1000).unref();
@@ -60,15 +62,16 @@ function auth(ws, m) {
 function handle(ws, m) {
   if (!ws.roomId) return m.op === 'auth' ? auth(ws, m) : 'auth first';
   if (m.op === 'send') {
-    if (typeof m.blob !== 'string') return 'bad request';
+    // receipt = sha256 of a nonce sealed inside the blob; only someone who decrypted it can later prove delivery.
+    if (typeof m.blob !== 'string' || !ID_RE.test(m.receipt)) return 'bad request';
     const now = Date.now();
     if (now - (ws.windowStart ?? 0) > 60_000) Object.assign(ws, { windowStart: now, sent: 0 });
     if (++ws.sent > MSG_PER_MIN) return 'rate limited';
-    const { id } = q.add.get(ws.roomId, ws.device, now, m.blob);
+    const { id } = q.add.get(ws.roomId, ws.device, now, m.blob, m.receipt);
     const out = JSON.stringify({ op: 'msg', id, ts: now, blob: m.blob });
     for (const peer of rooms.get(ws.roomId)) peer.send(out);
   } else if (m.op === 'ack') {
-    if (ws.mode === 'local') q.ack.run(ws.roomId, Number(m.id) || 0, ws.device);
+    if (ws.mode === 'local' && typeof m.receipt === 'string') q.ack.run(ws.roomId, Number(m.id) || 0, ws.device, sha256b64(m.receipt));
   } else return 'unknown op';
 }
 
