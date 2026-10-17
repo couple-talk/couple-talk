@@ -130,7 +130,7 @@ async function start(secret: Bytes) {
     },
     onReady: async (mode, items) => {
       for (const it of items) await receive(it, false, mode);
-      for (const who of ['me', 'partner'] as const) if (wanted[who] !== undefined) applyCharacter(who, wanted[who]!);
+      for (const who of ['me', 'partner'] as const) { const w = wanted[who]; if (w) applyCharacter(who, w.pack, w.id); }
     },
     onMsg: (it) => receive(it, true, config!.mode),
   });
@@ -190,8 +190,9 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
         : `${p.from}님이 ${ACTIONS[p.kind].join(' ')}`;
     // Replayed history only records the latest choice; it is applied once the replay is done (onReady).
     if (p.type === 'character') {
-      if (live) applyCharacter(mine ? 'me' : 'partner', p.pack);
-      else wanted[mine ? 'me' : 'partner'] = p.pack;
+      const who = mine ? 'me' : 'partner';
+      if (live) applyCharacter(who, p.pack, it.id);
+      else if ((wanted[who]?.id ?? -1) < it.id) wanted[who] = { id: it.id, pack: p.pack };
     }
     if (p.type === 'status') {
       statuses[mine ? 'me' : 'partner'] = p.emoji;
@@ -214,11 +215,13 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
 // History replays every character change in order; only the newest one per side may land.
 const charSeq: Record<Who, number> = { me: 0, partner: 0 };
 // Applied after each history replay, which also retries a failed download on reconnect.
-const wanted: Partial<Record<Who, string | null>> = {};
+// Keyed by message id so a replayed older change can't override a live newer one.
+const wanted: Partial<Record<Who, { id: number; pack: string | null }>> = {};
 
-async function applyCharacter(who: Who, hash: string | null) {
+async function applyCharacter(who: Who, hash: string | null, id: number) {
+  if ((wanted[who]?.id ?? -1) > id) return;
   const seq = ++charSeq[who];
-  wanted[who] = hash;
+  wanted[who] = { id, pack: hash };
   const label = $(who === 'me' ? '#char-me' : '#char-partner');
   try {
     if (!hash) await savePack(who, null);

@@ -43,7 +43,7 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
     w.p = new Promise((ok, fail) => Object.assign(w, { ok, fail }));
     waits.set(key, w);
     for (const m of msgs) ws.send(JSON.stringify(m));
-    setTimeout(() => settle(key, (x) => x.fail(new Error('timeout'))), timeoutMs);
+    setTimeout(() => { if (waits.get(key) === w) settle(key, (x) => x.fail(new Error('timeout'))); }, timeoutMs);
     return w.p;
   };
   return {

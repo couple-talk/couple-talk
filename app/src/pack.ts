@@ -97,6 +97,7 @@ export async function checkPack(files: Files, { svg = false } = {}): Promise<Rep
   }
   let size = 0;
   for (const file of used) {
+    if (errors.length) break; // a hostile pack must not cost a full decode of every file
     const where = file;
     if (file.endsWith('.svg')) continue;
     let img: Awaited<ReturnType<typeof readPng>>;
