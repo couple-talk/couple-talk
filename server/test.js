@@ -66,6 +66,15 @@ try {
   assert.equal((await alive.next()).op, 'ready');
   alive.close();
 
+  // per-socket send rate limit
+  const spam = await client({ roomId: id(), token: id(), device: id() });
+  await spam.next();
+  for (let i = 0; i < 61; i++) spam.put({ op: 'send', blob: 'S' });
+  const replies = [];
+  for (let i = 0; i < 61; i++) replies.push(await spam.next());
+  assert.equal(replies.at(-1).error, 'rate limited');
+  spam.close();
+
   console.log('server ok');
   for (const ws of [a, b, c, la, lb, lb2]) ws.close();
 } finally {

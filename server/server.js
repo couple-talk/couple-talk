@@ -8,6 +8,9 @@ const DB_PATH = process.env.DB_PATH ?? 'data.db';
 const LOCAL_TTL_MS = 7 * 24 * 3600 * 1000;
 const HISTORY_LIMIT = 500;
 const ID_RE = /^[A-Za-z0-9_-]{43}$/; // 32 bytes base64url
+const MSG_PER_MIN = 60;
+// ponytail: global cap on new rooms stops disk-filling spam but also blocks real sign-ups during an attack; per-IP limits need trusted proxy headers.
+const NEW_ROOMS_PER_HOUR = Number(process.env.NEW_ROOMS_PER_HOUR ?? 50);
 
 const db = new DatabaseSync(DB_PATH);
 db.exec(`
@@ -31,12 +34,15 @@ setInterval(expire, 3600 * 1000).unref();
 
 const sha256 = (s) => createHash('sha256').update(s).digest();
 const rooms = new Map(); // roomId -> Set<ws>
+let newRooms = 0;
+setInterval(() => { newRooms = 0; }, 3600 * 1000).unref();
 
 function auth(ws, m) {
   if (m.v !== 1 || !ID_RE.test(m.roomId) || !ID_RE.test(m.token) || !ID_RE.test(m.device)) return 'bad request';
   const hash = sha256(m.token);
   let room = q.room.get(m.roomId);
   if (!room) {
+    if (++newRooms > NEW_ROOMS_PER_HOUR) return 'busy';
     const mode = m.mode === 'local' ? 'local' : 'server';
     q.addRoom.run(m.roomId, hash, mode);
     room = { token_hash: hash, mode };
@@ -55,9 +61,11 @@ function handle(ws, m) {
   if (!ws.roomId) return m.op === 'auth' ? auth(ws, m) : 'auth first';
   if (m.op === 'send') {
     if (typeof m.blob !== 'string') return 'bad request';
-    const ts = Date.now();
-    const { id } = q.add.get(ws.roomId, ws.device, ts, m.blob);
-    const out = JSON.stringify({ op: 'msg', id, ts, blob: m.blob });
+    const now = Date.now();
+    if (now - (ws.windowStart ?? 0) > 60_000) Object.assign(ws, { windowStart: now, sent: 0 });
+    if (++ws.sent > MSG_PER_MIN) return 'rate limited';
+    const { id } = q.add.get(ws.roomId, ws.device, now, m.blob);
+    const out = JSON.stringify({ op: 'msg', id, ts: now, blob: m.blob });
     for (const peer of rooms.get(ws.roomId)) peer.send(out);
   } else if (m.op === 'ack') {
     if (ws.mode === 'local') q.ack.run(ws.roomId, Number(m.id) || 0, ws.device);
