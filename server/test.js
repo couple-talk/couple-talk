@@ -131,6 +131,11 @@ try {
   assert.match(metrics, /^couple_talk_connections \d+$/m);
   assert.ok(!/[A-Za-z0-9_-]{43}/.test(metrics), 'no room ids in metrics');
 
+  // a DB failure must not take the relay down through a metrics scrape
+  new DatabaseSync(DB_PATH).exec('DROP TABLE rooms');
+  assert.equal((await fetch(`http://localhost:${METRICS_PORT}/metrics`)).status, 503);
+  assert.equal((await fetch(`http://localhost:${PORT}/healthz`)).status, 503, 'process still up after the failed scrape');
+
   console.log('server ok');
   for (const ws of [a, b, c, la, intruder, lb, lb2]) ws.close();
 } finally {

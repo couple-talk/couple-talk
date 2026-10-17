@@ -121,11 +121,14 @@ let messagesTotal = 0;
 // Counts only, never room ids or content. Served on a port that only the internal docker network reaches.
 createServer((req, res) => {
   if (req.url !== '/metrics') return res.writeHead(404).end();
+  // A throw here would escape the http handler and kill the relay, not just this scrape.
+  let roomCount;
+  try { roomCount = q.countRooms.get().n; } catch { return res.writeHead(503).end(); }
   res.setHeader('Content-Type', 'text/plain; version=0.0.4');
   res.end([
     '# TYPE couple_talk_connections gauge', `couple_talk_connections ${wss.clients.size}`,
     '# TYPE couple_talk_rooms_online gauge', `couple_talk_rooms_online ${rooms.size}`,
-    '# TYPE couple_talk_rooms gauge', `couple_talk_rooms ${q.countRooms.get().n}`,
+    '# TYPE couple_talk_rooms gauge', `couple_talk_rooms ${roomCount}`,
     '# TYPE couple_talk_messages_total counter', `couple_talk_messages_total ${messagesTotal}`,
   ].join('\n') + '\n');
 }).listen(METRICS_PORT);
