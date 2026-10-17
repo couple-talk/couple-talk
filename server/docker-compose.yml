@@ -1,0 +1,31 @@
+# 맥미니 배포용. 실행: docker compose up -d --build
+#
+# 공개는 Cloudflare 터널이 한다. cloudflared 가 `macmini-shared` 안에서
+# `http://couple-talk-server:8080` 으로 붙는다. 셀프호스팅은 README 의 docker run 을 쓴다.
+name: couple-talk
+
+services:
+  server:
+    build: .
+    image: couple-talk-server:latest
+    # 터널 설정이 이 이름을 부른다. 자동 생성 이름은 프로젝트 이름이 바뀌면 같이 바뀐다.
+    container_name: couple-talk-server
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - data:/data
+    # ports: 가 없는 것은 의도다. 열면 터널의 TLS 를 우회하는 두 번째 문이 생긴다.
+    networks:
+      - macmini-shared
+
+volumes:
+  data:
+
+networks:
+  # mac-infra 가 만든다 (scripts/setup.sh).
+  macmini-shared:
+    external: true
