@@ -1,49 +1,49 @@
 import { emit, listen } from '@tauri-apps/api/event';
 import { currentMonitor, getCurrentWindow, PhysicalPosition, Window } from '@tauri-apps/api/window';
+import { loadPack, type Who } from './pack';
 import type { PetEvent } from './tauri';
 
-// Pack format: docs/character-pack.md. Packs only supply poses; every motion and effect lives here.
-type Manifest = { v: 2; name: string; speed: number; fps?: number; hand: [number, number]; poses: Record<string, string[]> };
+// Packs only supply poses (docs/character-pack.md); every motion and effect lives here.
 type Reaction = { pose: string; anim: string; emoji?: string; fx?: 'send' | 'hit' };
 
-const CHARACTER = 'default';
 const REACT_MS = 4000;
 const STATUS_POSES: Record<string, string> = {
   '💻': 'status_work', '🗓️': 'status_meeting', '🍚': 'status_eat', '☕': 'status_rest', '🔥': 'status_busy', '🏃': 'status_off',
 };
-// The pet is the partner's character: the partner's actions are its "send" poses, mine land on it.
+// The character whose owner acted plays the plain key; the other one plays `:hit`.
 const REACTIONS: Record<string, Reaction> = {
   chat: { pose: 'notify', anim: 'jump', emoji: '💬' },
   heart: { pose: 'heart_send', anim: 'jump', fx: 'send' },
-  'heart:mine': { pose: 'heart_hit', anim: 'squish', fx: 'hit' },
+  'heart:hit': { pose: 'heart_hit', anim: 'squish', fx: 'hit' },
   poke: { pose: 'poke_send', anim: 'shake', emoji: '👉' },
-  'poke:mine': { pose: 'poke_hit', anim: 'shake', emoji: '❗' },
+  'poke:hit': { pose: 'poke_hit', anim: 'shake', emoji: '❗' },
   hug: { pose: 'hug', anim: 'squish', emoji: '🤗' },
-  'hug:mine': { pose: 'hug', anim: 'squish', emoji: '🤗' },
+  'hug:hit': { pose: 'hug', anim: 'squish', emoji: '🤗' },
 };
 
 const pet = document.getElementById('pet')!;
 const body = document.getElementById('body') as HTMLImageElement;
 const bubble = document.getElementById('bubble')!;
 const win = getCurrentWindow();
+const who: Who = win.label === 'pet-me' ? 'me' : 'partner';
 
-const base = `/characters/${CHARACTER}/`;
-const manifest: Manifest = await (await fetch(base + 'manifest.json')).json();
-for (const f of Object.values(manifest.poses).flat()) new Image().src = base + f;
+let { manifest, url } = await loadPack(who);
+const preload = () => { for (const f of Object.values(manifest.poses).flat()) new Image().src = url(f); };
+preload();
 
 let pose = '';
 let frame = 0;
 const frames = (p: string) => (manifest.poses[p]?.length ? manifest.poses[p] : manifest.poses.idle);
 function draw() {
   const f = frames(pose);
-  const src = base + f[frame % f.length];
+  const src = url(f[frame % f.length]);
   if (body.getAttribute('src') !== src) body.src = src;
 }
 setInterval(() => {
   // idle's second frame is a blink, so flash it now and then instead of cycling.
   frame = pose === 'idle' ? +(Math.random() < 0.06) : frame + 1;
   draw();
-}, 1000 / (manifest.fps ?? 4));
+}, 1000 / manifest.fps);
 
 // Walk the window itself along the bottom of the work area, so no click-through handling is needed.
 const monitor = await currentMonitor();
@@ -51,7 +51,7 @@ const area = monitor!.workArea;
 const scale = monitor!.scaleFactor;
 const winW = 120 * scale;
 const y = area.position.y + area.size.height - 130 * scale;
-let x = area.position.x + area.size.width - winW - 40 * scale;
+let x = area.position.x + area.size.width - winW - (who === 'me' ? 200 : 40) * scale;
 let dir = -1;
 let pauseUntil = 0;
 let reactPose = '';
@@ -106,13 +106,20 @@ function react(r: Reaction) {
   bubbleTimer = window.setTimeout(() => { bubble.classList.remove('on'); pet.classList.remove(r.anim); }, REACT_MS);
 }
 
-await listen<PetEvent>('pet', ({ payload: e }) => {
+await listen<PetEvent>('pet', async ({ payload: e }) => {
+  if (e.type === 'reload') {
+    ({ manifest, url } = await loadPack(who));
+    preload();
+    draw();
+    return;
+  }
+  if (e.from !== who && e.type !== 'action') return;
   if (e.type === 'status') {
     document.getElementById('status')!.textContent = e.emoji;
     if (STATUS_POSES[e.emoji]) { statusPose = STATUS_POSES[e.emoji]; statusUntil = Date.now() + REACT_MS; }
     return;
   }
-  const r = REACTIONS[e.type === 'chat' ? 'chat' : e.kind + (e.mine ? ':mine' : '')];
+  const r = REACTIONS[e.type === 'chat' ? 'chat' : e.kind + (e.from === who ? '' : ':hit')];
   if (!r) return;
   if (r.fx !== 'hit') return react(r);
   heart('incoming', -10, 50, 0);

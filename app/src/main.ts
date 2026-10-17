@@ -1,6 +1,7 @@
 import './style.css';
 import { b64, deriveRoom, open, randomId, receiptOf, seal, unb64, unwrapSecret, wrapSecret, type Bytes, type Room } from './crypto';
 import { connect, type Item } from './net';
+import type { Who } from './pack';
 import { deviceKey, isTauri, petEmit, petListen, setupMainWindow, quitApp } from './tauri';
 
 type Mode = 'server' | 'local';
@@ -101,7 +102,7 @@ $('#reset').onclick = (e) => {
 let room: Room;
 let secretBytes: Bytes;
 let lastId = 0;
-let partnerStatus = '';
+const statuses: Record<Who, string> = { me: '', partner: '' };
 const seen = new Set<number>();
 const seenNonces = new Set<string>();
 let net: ReturnType<typeof connect>;
@@ -179,10 +180,10 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
     row.querySelector('.text')!.textContent = p.type === 'status'
       ? `${p.from} · ${p.emoji} ${p.text}`
       : `${p.from}님이 ${ACTIONS[p.kind].join(' ')}`;
-    if (p.type === 'status' && !mine) {
-      partnerStatus = p.emoji;
-      $('#partner').textContent = `${p.from} ${p.emoji} ${p.text}`;
-      petEmit({ type: 'status', emoji: p.emoji });
+    if (p.type === 'status') {
+      statuses[mine ? 'me' : 'partner'] = p.emoji;
+      if (!mine) $('#partner').textContent = `${p.from} ${p.emoji} ${p.text}`;
+      petEmit({ type: 'status', emoji: p.emoji, from: mine ? 'me' : 'partner' });
     }
   }
   row.querySelector('.time')!.textContent = time;
@@ -190,8 +191,8 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   list.append(row);
   list.scrollTop = list.scrollHeight;
   // Only content-free signals go to the desktop pet so coworkers can't read over a shoulder.
-  if (live && p.type === 'action') petEmit({ type: 'action', kind: p.kind, mine });
-  else if (live && !mine && p.type === 'chat') petEmit({ type: 'chat' });
+  if (live && p.type === 'action') petEmit({ type: 'action', kind: p.kind, from: mine ? 'me' : 'partner' });
+  else if (live && !mine && p.type === 'chat') petEmit({ type: 'chat', from: 'partner' });
   return p;
 }
 
@@ -228,7 +229,9 @@ $('#copy-code').onclick = () => navigator.clipboard.writeText($('#code').textCon
 $('#quit').hidden = !isTauri;
 $('#quit').onclick = quitApp;
 
-petListen(() => partnerStatus && petEmit({ type: 'status', emoji: partnerStatus }));
+petListen(() => {
+  for (const from of ['me', 'partner'] as const) if (statuses[from]) petEmit({ type: 'status', emoji: statuses[from], from });
+});
 setupMainWindow();
 
 if (config) show('unlock');

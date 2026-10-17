@@ -33,6 +33,20 @@
         "resizable": false,
         "shadow": false,
         "focus": false
+      },
+      {
+        "label": "pet-me",
+        "url": "pet.html",
+        "title": "pet-me",
+        "width": 120,
+        "height": 130,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
+        "focus": false
       }
     ],
     "security": {

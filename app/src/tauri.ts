@@ -1,3 +1,5 @@
+import type { Who } from './pack';
+
 // Thin wrappers so the main window also runs in a plain browser (no pet there).
 export const isTauri = '__TAURI_INTERNALS__' in window;
 
@@ -12,12 +14,17 @@ export async function deviceKey(create: boolean): Promise<Uint8Array<ArrayBuffer
   return new Uint8Array(await invoke<number[]>('device_key', { fresh }));
 }
 
-export type PetEvent = { type: 'chat' } | { type: 'status'; emoji: string } | { type: 'action'; kind: string; mine: boolean };
+/** `from` says whose character acts; each pet window draws one side. `reload` means a pack changed. */
+export type PetEvent =
+  | { type: 'reload' }
+  | { type: 'chat'; from: Who }
+  | { type: 'status'; emoji: string; from: Who }
+  | { type: 'action'; kind: string; from: Who };
 
 export async function petEmit(e: PetEvent) {
   if (!isTauri) return;
   const { emitTo } = await import('@tauri-apps/api/event');
-  await emitTo('pet', 'pet', e);
+  await Promise.all(['pet', 'pet-me'].map((w) => emitTo(w, 'pet', e)));
 }
 
 /** Called when the pet window starts and asks for the current partner status. */

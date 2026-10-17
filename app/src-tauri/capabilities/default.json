@@ -4,7 +4,8 @@
   "description": "Main chat window and desktop pet",
   "windows": [
     "main",
-    "pet"
+    "pet",
+    "pet-me"
   ],
   "permissions": [
     "core:default",
