@@ -1,7 +1,7 @@
 import './style.css';
 import { b64, deriveRoom, open, randomId, receiptOf, seal, unb64, unwrapSecret, wrapSecret, type Bytes, type Room } from './crypto';
 import { connect, type Item } from './net';
-import type { Who } from './pack';
+import { checkPack, savePack, storedPack, toStored, type Files, type Who } from './pack';
 import { deviceKey, isTauri, petEmit, petListen, setupMainWindow, quitApp } from './tauri';
 
 type Mode = 'server' | 'local';
@@ -10,7 +10,9 @@ type Config = { server: string; wrapped: string; peppered: boolean; nick: string
 type Payload = { v: 1; from: string; n?: string; at?: number } & (
   | { type: 'chat'; text: string }
   | { type: 'status'; emoji: string; text: string }
-  | { type: 'action'; kind: keyof typeof ACTIONS });
+  | { type: 'action'; kind: keyof typeof ACTIONS }
+  // pack: sha256 of the sealed pack on the relay, or null for the built-in character
+  | { type: 'character'; pack: string | null; name: string });
 
 const DEFAULT_SERVER = import.meta.env.VITE_DEFAULT_SERVER ?? 'ws://localhost:8080';
 const STATUSES = [['💻', '일하는 중'], ['🗓️', '회의 중'], ['🍚', '밥 먹는 중'], ['☕', '쉬는 중'], ['🔥', '바빠요'], ['🏃', '퇴근!']];
@@ -94,6 +96,7 @@ $('#reset').onclick = (e) => {
   if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = '정말 지울까요? 한 번 더 누르세요'; return; }
   localStorage.removeItem('ct.config');
   localStorage.removeItem('ct.history');
+  indexedDB.deleteDatabase('ct-packs');
   location.reload();
 };
 
@@ -127,6 +130,7 @@ async function start(secret: Bytes) {
     },
     onReady: async (mode, items) => {
       for (const it of items) await receive(it, false, mode);
+      for (const who of ['me', 'partner'] as const) if (wanted[who] !== undefined) applyCharacter(who, wanted[who]!);
     },
     onMsg: (it) => receive(it, true, config!.mode),
   });
@@ -150,6 +154,7 @@ function isValid(p: unknown): p is Payload {
   if ((o.n !== undefined && typeof o.n !== 'string') || (o.at !== undefined && typeof o.at !== 'number')) return false;
   if (o.type === 'chat') return typeof o.text === 'string';
   if (o.type === 'status') return typeof o.emoji === 'string' && typeof o.text === 'string';
+  if (o.type === 'character') return (o.pack === null || (typeof o.pack === 'string' && /^[\w-]{43}$/.test(o.pack))) && typeof o.name === 'string';
   return o.type === 'action' && typeof o.kind === 'string' && Object.hasOwn(ACTIONS, o.kind);
 }
 
@@ -179,7 +184,10 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
     row.innerHTML = '<span class="text"></span> <span class="time"></span>';
     row.querySelector('.text')!.textContent = p.type === 'status'
       ? `${p.from} · ${p.emoji} ${p.text}`
-      : `${p.from}님이 ${ACTIONS[p.kind].join(' ')}`;
+      : p.type === 'character'
+        ? `${p.from}님이 캐릭터를 바꿨어요: ${p.name}`
+        : `${p.from}님이 ${ACTIONS[p.kind].join(' ')}`;
+    if (p.type === 'character') applyCharacter(mine ? 'me' : 'partner', p.pack);
     if (p.type === 'status') {
       statuses[mine ? 'me' : 'partner'] = p.emoji;
       if (!mine) $('#partner').textContent = `${p.from} ${p.emoji} ${p.text}`;
@@ -194,6 +202,69 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   if (live && p.type === 'action') petEmit({ type: 'action', kind: p.kind, from: mine ? 'me' : 'partner' });
   else if (live && !mine && p.type === 'chat') petEmit({ type: 'chat', from: 'partner' });
   return p;
+}
+
+// ---------- characters ----------
+
+// History replays every character change in order; only the newest one per side may land.
+const charSeq: Record<Who, number> = { me: 0, partner: 0 };
+// Retried on reconnect so one failed download doesn't stick until the partner changes again.
+const wanted: Partial<Record<Who, string | null>> = {};
+
+async function applyCharacter(who: Who, hash: string | null) {
+  const seq = ++charSeq[who];
+  wanted[who] = hash;
+  const label = $(who === 'me' ? '#char-me' : '#char-partner');
+  try {
+    if (!hash) await savePack(who, null);
+    else if ((await storedPack(who))?.hash !== hash) {
+      label.textContent = '불러오는 중…';
+      if (!net) throw new Error('offline'); // local-mode history renders before connecting
+      const blob = await net.getPack(hash);
+      if (seq !== charSeq[who]) return;
+      // The relay checks this too, but it must not be able to swap in another pack from this room.
+      if (!blob || (await receiptOf(blob)) !== hash) throw new Error('서버에서 팩을 찾을 수 없어요');
+      const sealed = await open<{ files: Record<string, string> }>(room.key, blob);
+      const files: Files = Object.fromEntries(Object.entries(sealed.files).map(([k, v]) => [k, unb64(v)]));
+      const report = await checkPack(files);
+      if (!report.manifest) throw new Error(report.errors[0]);
+      if (seq !== charSeq[who]) return;
+      await savePack(who, await toStored(hash, report.manifest, files));
+    }
+    if (seq !== charSeq[who]) return;
+    petEmit({ type: 'reload' });
+    await showCharacters();
+  } catch (e) {
+    if (seq === charSeq[who]) label.textContent = `불러오지 못했어요 (${(e as Error).message})`;
+  }
+}
+
+async function showCharacters() {
+  for (const who of ['me', 'partner'] as const)
+    $(who === 'me' ? '#char-me' : '#char-partner').textContent = (await storedPack(who))?.manifest.name ?? '말랑이 (기본)';
+}
+
+async function importPack(list: FileList) {
+  const report = $('#char-report');
+  report.replaceChildren();
+  const note = (text: string, cls = '') => report.append(Object.assign(document.createElement('li'), { textContent: text, className: cls }));
+  const files: Files = {};
+  for (const f of list) files[f.name] = new Uint8Array(await f.arrayBuffer());
+  const r = await checkPack(files);
+  for (const e of r.errors) note(`❌ ${e}`, 'error');
+  for (const w of r.warnings) note(`⚠️ ${w}`);
+  if (!r.manifest) return;
+  note('검사 통과. 암호화해서 보내는 중…');
+  const used = ['manifest.json', ...new Set(Object.values(r.manifest.poses).flat())];
+  const blob = await seal(room.key, { files: Object.fromEntries(used.map((f) => [f, b64(files[f])])) });
+  const hash = await receiptOf(blob);
+  try { await net.putPack(hash, blob); } catch (e) {
+    const msg = (e as Error).message;
+    note(msg === 'unknown op' ? '이 서버는 캐릭터 팩 전송을 지원하지 않아요. 서버를 업데이트해 주세요.' : `보내지 못했어요 (${msg})`, 'error');
+    return;
+  }
+  await savePack('me', await toStored(hash, r.manifest, files));
+  if (await sendPayload({ type: 'character', pack: hash, name: r.manifest.name })) note(`✅ ${r.manifest.name}(으)로 바꿨어요. 상대 화면에도 보여요.`);
 }
 
 async function sendPayload(p: Record<string, unknown>) {
@@ -225,6 +296,14 @@ $('#actions').append(...Object.entries(ACTIONS).map(([kind, [emoji, label]]) => 
 }));
 
 $('#show-code').onclick = showCode;
+$('#show-chars').onclick = () => { showCharacters(); $<HTMLDialogElement>('#char-dialog').showModal(); };
+$<HTMLInputElement>('#char-file').onchange = async (e) => {
+  const input = e.currentTarget as HTMLInputElement;
+  if (!input.files?.length) return;
+  input.disabled = true;
+  try { await importPack(input.files); } finally { input.disabled = false; input.value = ''; }
+};
+$('#char-default').onclick = () => sendPayload({ type: 'character', pack: null, name: '말랑이' });
 $('#copy-code').onclick = () => navigator.clipboard.writeText($('#code').textContent!);
 $('#quit').hidden = !isTauri;
 $('#quit').onclick = quitApp;

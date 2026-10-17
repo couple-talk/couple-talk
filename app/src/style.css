@@ -48,4 +48,6 @@ fieldset { border: 1px solid var(--theirs); border-radius: 8px; }
 #send-form button { flex: none; }
 footer { font-size: 11px; color: var(--muted); }
 dialog { border: 0; border-radius: 12px; max-width: 420px; background: var(--card); color: var(--fg); }
+#char-dialog h2 { font-size: 15px; margin: 0 0 8px; }
+#char-report { padding-left: 0; list-style: none; font-size: 12px; max-height: 160px; overflow-y: auto; }
 #code { display: block; word-break: break-all; background: var(--theirs); padding: 8px; border-radius: 8px; margin: 8px 0; user-select: all; }
