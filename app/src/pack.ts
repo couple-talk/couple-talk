@@ -63,8 +63,11 @@ async function readPng(buf: Uint8Array) {
 
 const num = (n: unknown, min: number, max: number, d: number) => (n === undefined ? d : typeof n === 'number' && n >= min && n <= max ? n : NaN);
 
-/** `svg` is only for the built-in pack: packs from users and partners must be PNG. */
-export async function checkPack(files: Files, { svg = false } = {}): Promise<Report> {
+/**
+ * `svg` is only for the built-in pack: packs from users and partners must be PNG.
+ * `all` keeps checking after the first error, for the author's own pack; a partner's pack stops early.
+ */
+export async function checkPack(files: Files, { svg = false, all = false } = {}): Promise<Report> {
   const errors: string[] = [], warnings: string[] = [];
   let m;
   try { m = JSON.parse(new TextDecoder().decode(files['manifest.json'])); } catch { return { errors: ['manifest.json이 없거나 JSON 형식이 아니에요'], warnings }; }
@@ -97,7 +100,7 @@ export async function checkPack(files: Files, { svg = false } = {}): Promise<Rep
   }
   let size = 0;
   for (const file of used) {
-    if (errors.length) break; // a hostile pack must not cost a full decode of every file
+    if (errors.length && !all) break; // a hostile pack must not cost a full decode of every file
     const where = file;
     if (file.endsWith('.svg')) continue;
     let img: Awaited<ReturnType<typeof readPng>>;

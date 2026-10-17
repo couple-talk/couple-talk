@@ -259,7 +259,7 @@ async function importPack(list: FileList) {
   const note = (text: string, cls = '') => report.append(Object.assign(document.createElement('li'), { textContent: text, className: cls }));
   const files: Files = {};
   for (const f of list) files[f.name] = new Uint8Array(await f.arrayBuffer());
-  const r = await checkPack(files);
+  const r = await checkPack(files, { all: true }); // my own files: show every problem at once
   for (const e of r.errors) note(`❌ ${e}`, 'error');
   for (const w of r.warnings) note(`⚠️ ${w}`);
   if (!r.manifest) return;

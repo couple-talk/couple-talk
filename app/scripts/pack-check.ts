@@ -5,7 +5,7 @@ import { deflateSync } from 'node:zlib';
 import { checkPack as check, type Files } from '../src/pack.ts';
 
 // The fixture is the SVG built-in pack; SVG rejection for imports is checked separately below.
-const checkPack = (files: Files) => check(files, { svg: true });
+const checkPack = (files: Files, o = {}) => check(files, { svg: true, ...o });
 
 const dir = 'public/characters/default/';
 const good: Files = Object.fromEntries(readdirSync(dir).filter((f) => !f.startsWith('.')).map((f) => [f, readFileSync(dir + f)]));
@@ -65,5 +65,12 @@ assert.ok(noData.errors.some((e) => e.includes('잘못됐어요')), 'empty IDAT 
 await rejects(withManifest({ ...manifest, poses: { ...manifest.poses, idle: Array(9).fill('idle.svg') } }), 'too many frames');
 await rejects(withManifest({ ...manifest, poses: { ...manifest.poses, ...Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`x${i}`, ['idle.svg']])) } }), 'too many poses');
 assert.ok((await check(good)).errors.some((e) => e.includes('PNG만')), 'imports must be PNG only');
+
+// pack authors see every error; received packs stop at the first one
+const opaque = Buffer.concat([ihdr(64), chunk('IDAT', deflateSync(Buffer.alloc((64 * 4 + 1) * 64, 0xff)))]);
+const many = withManifest({ ...manifest, name: 'x'.repeat(21), poses: { ...manifest.poses, idle: ['o1.png', 'o2.png', 'o3.png'] } },
+  { 'o1.png': opaque, 'o2.png': opaque, 'o3.png': opaque });
+assert.equal((await checkPack(many)).errors.length, 1, 'default stops before decoding');
+assert.equal((await checkPack(many, { all: true })).errors.filter((e) => e.includes('투명하지')).length, 3, 'all checks every frame');
 
 console.log('pack ok');

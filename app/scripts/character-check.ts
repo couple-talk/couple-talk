@@ -9,7 +9,7 @@ if (!dir) { console.error('usage: node scripts/character-check.ts <pack dir>'); 
 const files: Files = {};
 for (const f of readdirSync(dir)) if (statSync(join(dir, f)).isFile()) files[f] = readFileSync(join(dir, f));
 // The built-in pack is SVG; packs imported in the app must be PNG.
-const { errors, warnings } = await checkPack(files, { svg: process.argv.includes('--svg') });
+const { errors, warnings } = await checkPack(files, { svg: process.argv.includes('--svg'), all: true });
 for (const w of warnings) console.warn('⚠️ ', w);
 for (const e of errors) console.error('❌', e);
 console.log(errors.length ? `불합격: 오류 ${errors.length}개` : `합격 (경고 ${warnings.length}개)`);
