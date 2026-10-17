@@ -1,10 +1,10 @@
 import './style.css';
 import { b64, deriveRoom, open, randomId, receiptOf, seal, unb64, unwrapSecret, wrapSecret, type Bytes, type Room } from './crypto';
 import { connect, type Item } from './net';
-import { isTauri, petEmit, petListen, setupMainWindow, quitApp } from './tauri';
+import { deviceKey, isTauri, petEmit, petListen, setupMainWindow, quitApp } from './tauri';
 
 type Mode = 'server' | 'local';
-type Config = { server: string; wrapped: string; nick: string; mode: Mode; device: string };
+type Config = { server: string; wrapped: string; peppered: boolean; nick: string; mode: Mode; device: string };
 // n: per-message nonce (replay detection + delivery receipt), at: sender clock
 type Payload = { v: 1; from: string; n: string; at: number } & (
   | { type: 'chat'; text: string }
@@ -38,9 +38,16 @@ async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: stri
   if (u.protocol !== 'wss:' && !(u.protocol === 'ws:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)))
     throw new Error('서버 주소는 wss:// 로 시작해야 해요 (로컬 테스트만 ws:// 허용)');
   if (!nick.trim()) throw new Error('닉네임을 입력해 주세요');
-  config = { server, wrapped: await wrapSecret(secret, pin), nick: nick.trim(), mode, device: randomId() };
+  const pepper = await loadDeviceKey();
+  config = { server, wrapped: await wrapSecret(secret, pin, pepper), peppered: !!pepper, nick: nick.trim(), mode, device: randomId() };
   save('ct.config', config);
   await start(secret);
+}
+
+async function loadDeviceKey() {
+  try { return (await deviceKey()) ?? undefined; } catch (e) {
+    throw new Error(`OS 키체인을 쓸 수 없어요 (${e}). 이 PC를 초기화하고 페어링 코드로 다시 연결해 주세요.`);
+  }
 }
 
 function bindForm(id: string, fn: (f: FormData) => Promise<void>) {
@@ -67,7 +74,8 @@ bindForm('#join-form', async (f) => {
 
 bindForm('#unlock-form', async (f) => {
   let secret: Bytes;
-  try { secret = await unwrapSecret(config!.wrapped, String(f.get('pin'))); } catch { throw new Error('비밀번호가 틀렸어요'); }
+  const pepper = config!.peppered ? await loadDeviceKey() : undefined;
+  try { secret = await unwrapSecret(config!.wrapped, String(f.get('pin')), pepper); } catch { throw new Error('비밀번호가 틀렸어요'); }
   await start(secret);
 });
 

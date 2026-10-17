@@ -23,6 +23,11 @@ const wrapped = await wrapSecret(secret, '1234');
 assert.deepEqual(await unwrapSecret(wrapped, '1234'), secret);
 await assert.rejects(unwrapSecret(wrapped, '0000'));
 
+const pepper = crypto.getRandomValues(new Uint8Array(32));
+const peppered = await wrapSecret(secret, '1234', pepper);
+assert.deepEqual(await unwrapSecret(peppered, '1234', pepper), secret);
+await assert.rejects(unwrapSecret(peppered, '1234'), 'copied storage without the keychain key must not unwrap');
+
 const nonce = randomId();
 assert.equal(await receiptOf(nonce), createHash('sha256').update(nonce).digest('base64url'));
 

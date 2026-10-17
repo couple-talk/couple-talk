@@ -49,24 +49,25 @@ export async function open<T>(key: CryptoKey, blob: string): Promise<T> {
   return JSON.parse(dec.decode(pt));
 }
 
-async function pinKey(pin: string, salt: Bytes) {
+/** `pepper` is the OS-keychain device key; without it the wrap is only as strong as the password. */
+async function pinKey(pin: string, salt: Bytes, pepper?: Bytes) {
   const base = await crypto.subtle.importKey('raw', enc.encode(pin), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 600_000 },
+    { name: 'PBKDF2', hash: 'SHA-256', salt: pepper ? concat(salt, pepper.buffer) : salt, iterations: 600_000 },
     base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'],
   );
 }
 
-export async function wrapSecret(secret: Bytes, pin: string): Promise<string> {
+export async function wrapSecret(secret: Bytes, pin: string, pepper?: Bytes): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await pinKey(pin, salt), secret);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await pinKey(pin, salt, pepper), secret);
   return b64(concat(concat(salt, iv.buffer), ct));
 }
 
 /** Throws on a wrong PIN (AES-GCM auth failure). */
-export async function unwrapSecret(wrapped: string, pin: string): Promise<Bytes> {
+export async function unwrapSecret(wrapped: string, pin: string, pepper?: Bytes): Promise<Bytes> {
   const raw = unb64(wrapped);
-  const key = await pinKey(pin, raw.slice(0, 16));
+  const key = await pinKey(pin, raw.slice(0, 16), pepper);
   return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(16, 28) }, key, raw.slice(28)));
 }

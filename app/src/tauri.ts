@@ -1,6 +1,14 @@
 // Thin wrappers so the main window also runs in a plain browser (no pet there).
 export const isTauri = '__TAURI_INTERNALS__' in window;
 
+/** OS-keychain device key, or null in a plain browser. Throws if the keychain is unavailable. */
+export async function deviceKey(): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!isTauri) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  const fresh = Array.from(crypto.getRandomValues(new Uint8Array(32)));
+  return new Uint8Array(await invoke<number[]>('device_key', { fresh }));
+}
+
 export type PetEvent = { type: 'chat' } | { type: 'status'; emoji: string } | { type: 'action'; kind: string };
 
 export async function petEmit(e: PetEvent) {
