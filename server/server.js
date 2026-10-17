@@ -82,7 +82,8 @@ function auth(ws, m) {
   const items = room.mode === 'local'
     ? q.pending.all(m.roomId, m.device)
     : q.since.all(m.roomId, Number(m.since) || 0, HISTORY_LIMIT).reverse();
-  ws.send(JSON.stringify({ op: 'ready', v: 1, mode: room.mode, items }));
+  // packs: version of the pack upload protocol (2 = ordered parts). Clients check it before uploading.
+  ws.send(JSON.stringify({ op: 'ready', v: 1, mode: room.mode, items, packs: 2 }));
 }
 
 function limited(ws) {

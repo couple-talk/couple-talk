@@ -264,10 +264,10 @@ async function importPack(list: FileList) {
   for (const w of r.warnings) note(`⚠️ ${w}`);
   if (!r.manifest) return;
   note('검사 통과. 암호화해서 보내는 중…');
-  // Old relays close the socket on a big frame, so ask a tiny question first to get a clear answer.
-  try { await net.getPack('A'.repeat(43)); } catch (e) {
-    const msg = (e as Error).message;
-    note(msg === 'unknown op' ? '이 서버는 캐릭터 팩 전송을 지원하지 않아요. 서버를 업데이트해 주세요.' : `보내지 못했어요 (${msg})`, 'error');
+  // Older relays reject part uploads without a hash in the error, which would only surface as a timeout.
+  const v = net.packs();
+  if (v !== 2) {
+    note(v === null ? '연결 중이에요. 잠시 후 다시 시도해 주세요.' : '이 서버는 캐릭터 팩 전송을 지원하지 않아요. 서버를 업데이트해 주세요.', 'error');
     return;
   }
   const used = ['manifest.json', ...new Set(Object.values(r.manifest.poses).flat())];

@@ -35,7 +35,9 @@ try {
   // server mode: history + broadcast
   const room = { roomId: id(), token: id() };
   const a = await client({ ...room, device: id() });
-  assert.deepEqual((await a.next()).items, []);
+  const ready = await a.next();
+  assert.deepEqual(ready.items, []);
+  assert.equal(ready.packs, 2, 'ready advertises the pack upload protocol');
   const b = await client({ ...room, device: id() });
   await b.next();
   a.put({ op: 'send', blob: 'CIPHER1', receipt: receiptOf(id()) });
