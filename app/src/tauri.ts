@@ -12,7 +12,7 @@ export async function deviceKey(create: boolean): Promise<Uint8Array<ArrayBuffer
   return new Uint8Array(await invoke<number[]>('device_key', { fresh }));
 }
 
-export type PetEvent = { type: 'chat' } | { type: 'status'; emoji: string } | { type: 'action'; kind: string };
+export type PetEvent = { type: 'chat' } | { type: 'status'; emoji: string } | { type: 'action'; kind: string; mine: boolean };
 
 export async function petEmit(e: PetEvent) {
   if (!isTauri) return;

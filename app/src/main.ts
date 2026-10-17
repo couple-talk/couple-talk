@@ -12,7 +12,7 @@ type Payload = { v: 1; from: string; n?: string; at?: number } & (
   | { type: 'action'; kind: keyof typeof ACTIONS });
 
 const DEFAULT_SERVER = import.meta.env.VITE_DEFAULT_SERVER ?? 'ws://localhost:8080';
-const STATUSES = [['💻', '일하는 중'], ['🍚', '밥 먹는 중'], ['☕', '쉬는 중'], ['🔥', '바빠요'], ['🏃', '퇴근!']];
+const STATUSES = [['💻', '일하는 중'], ['🗓️', '회의 중'], ['🍚', '밥 먹는 중'], ['☕', '쉬는 중'], ['🔥', '바빠요'], ['🏃', '퇴근!']];
 const ACTIONS = { poke: ['👉', '콕 찔렀어요'], heart: ['❤️', '하트를 보냈어요'], hug: ['🤗', '안아줬어요'] } as const;
 // ponytail: localStorage caps around 5MB; move local history to IndexedDB if couples hit it.
 const LOCAL_HISTORY_MAX = 5000;
@@ -190,7 +190,8 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   list.append(row);
   list.scrollTop = list.scrollHeight;
   // Only content-free signals go to the desktop pet so coworkers can't read over a shoulder.
-  if (live && !mine && p.type !== 'status') petEmit(p.type === 'action' ? { type: 'action', kind: p.kind } : { type: 'chat' });
+  if (live && p.type === 'action') petEmit({ type: 'action', kind: p.kind, mine });
+  else if (live && !mine && p.type === 'chat') petEmit({ type: 'chat' });
   return p;
 }
 

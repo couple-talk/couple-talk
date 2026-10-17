@@ -1,6 +1,24 @@
 {
-  "v": 1,
+  "v": 2,
+  "id": "default",
   "name": "말랑이",
-  "image": "body.svg",
-  "speed": 2
+  "author": "couple-talk",
+  "speed": 2,
+  "fps": 4,
+  "hand": [0.88, 0.55],
+  "poses": {
+    "idle": ["idle.svg", "idle-blink.svg"],
+    "walk": ["walk-1.svg", "walk-2.svg"],
+    "notify": ["notify.svg"],
+    "heart_send": ["heart-send.svg"],
+    "heart_hit": ["heart-hit.svg"],
+    "poke_hit": ["poke-hit.svg"],
+    "hug": ["hug.svg"],
+    "status_work": ["work.svg"],
+    "status_meeting": ["meeting.svg"],
+    "status_eat": ["eat.svg"],
+    "status_rest": ["rest.svg"],
+    "status_busy": ["busy.svg"],
+    "status_off": ["off.svg"]
+  }
 }
