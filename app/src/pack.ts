@@ -114,7 +114,10 @@ function store<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReques
     req.onupgradeneeded = () => req.result.createObjectStore('packs');
     req.onerror = () => fail(req.error);
     req.onsuccess = () => {
-      const r = fn(req.result.transaction('packs', mode).objectStore('packs'));
+      // Close right away (the transaction still completes): an open connection in a pet window blocks deleteDatabase on reset.
+      const db = req.result;
+      const r = fn(db.transaction('packs', mode).objectStore('packs'));
+      db.close();
       r.onsuccess = () => ok(r.result);
       r.onerror = () => fail(r.error);
     };

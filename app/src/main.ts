@@ -92,13 +92,15 @@ bindForm('#unlock-form', async (f) => {
 });
 
 // Native confirm()/alert() aren't reliable in Tauri webviews, so confirm by clicking twice.
-$('#reset').onclick = (e) => {
+$('#reset').onclick = async (e) => {
   const b = e.currentTarget as HTMLButtonElement;
   if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = '정말 지울까요? 한 번 더 누르세요'; return; }
   localStorage.removeItem('ct.config');
   localStorage.removeItem('ct.history');
   localStorage.removeItem('ct.partner');
-  indexedDB.deleteDatabase('ct-packs');
+  await new Promise((done) => { const r = indexedDB.deleteDatabase('ct-packs'); r.onsuccess = r.onerror = r.onblocked = done; });
+  // Awaited so the pets drop the old name tags and characters before this page navigates away.
+  await petEmit({ type: 'reload' }).catch(() => {});
   location.reload();
 };
 
