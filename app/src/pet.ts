@@ -46,9 +46,10 @@ setInterval(() => {
 }, 1000 / manifest.fps);
 
 // Walk the window itself along the bottom of the work area, so no click-through handling is needed.
-// The window stays small and only grows upward while a speech bubble is up, so it rarely blocks clicks.
-const SMALL = { w: 120, h: 130 };
-const SAY = { w: 220, h: 220 };
+// The window stays small and only grows while a speech bubble or hearts are up, so it rarely blocks clicks.
+// SMALL leaves 50px above the 100px character for emoji bubbles; keep it in sync with tauri.conf.json.
+const SMALL = { w: 120, h: 150 };
+const BIG = { w: 220, h: 220 };
 const monitor = await currentMonitor();
 const area = monitor!.workArea;
 const scale = monitor!.scaleFactor;
@@ -116,7 +117,9 @@ function react(r: Reaction, say?: string) {
   reactPose = r.pose;
   reactUntil = Date.now() + REACT_MS;
   const text = say ? clip(say) : '';
-  resize(text ? SAY : SMALL);
+  // Flying hearts need the side room as much as a bubble does.
+  const big = !!(text || r.fx);
+  resize(big ? BIG : SMALL);
   bubble.textContent = text || r.emoji || '';
   bubble.classList.toggle('on', !!(text || r.emoji));
   bubble.classList.toggle('say', !!text);
@@ -134,7 +137,7 @@ function react(r: Reaction, say?: string) {
     bubble.classList.remove('on');
     pet.classList.remove(r.anim);
     // Shrink only after the fade-out so the bubble isn't cut mid-transition.
-    if (text) setTimeout(() => !bubble.classList.contains('on') && resize(SMALL), 250);
+    if (big) setTimeout(() => !bubble.classList.contains('on') && resize(SMALL), 250);
   }, ms);
 }
 
@@ -154,6 +157,7 @@ await listen<PetEvent>('pet', async ({ payload: e }) => {
   const r = REACTIONS[e.type === 'chat' ? 'chat' : e.kind + (e.from === who ? '' : ':hit')];
   if (!r) return;
   if (r.fx !== 'hit') return react(r, e.type === 'chat' ? e.text : undefined);
+  await resize(BIG); // the incoming heart starts left of the character
   heart('incoming', -10, 50, 0);
   setTimeout(() => react(r), 450);
 });
