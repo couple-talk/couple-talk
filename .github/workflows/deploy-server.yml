@@ -1,0 +1,50 @@
+# Mac mini self-hosted runner deploys the relay when server code lands on main.
+# Never add a pull_request trigger here: this is a public repo, and fork PRs must not run on the Mac mini.
+name: deploy server
+
+on:
+  push:
+    branches: [main]
+    paths: ['server/**', '.github/workflows/deploy-server.yml']
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 되돌릴 커밋 SHA (비우면 main 최신)
+        required: false
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, couple-talk-macmini]
+    env:
+      # Images stay on the Mac mini tagged by commit, so a rollback is a redeploy of an older tag.
+      IMAGE_TAG: ${{ inputs.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.IMAGE_TAG }}
+
+      - name: test
+        working-directory: server
+        run: npm ci && npm test
+
+      - name: build and replace
+        working-directory: server
+        # --wait returns only once the HEALTHCHECK passes; a failing image leaves the job red.
+        run: docker compose up -d --build --wait --wait-timeout 120
+
+      - name: check through the tunnel
+        run: curl -fsS --retry 5 --retry-delay 3 https://couple-talk.tpsg.co.kr/healthz
+
+      - name: keep the last 5 images
+        if: success()
+        run: |
+          docker images couple-talk-server --format '{{.CreatedAt}}|{{.Tag}}' \
+            | grep -v '|latest$' | sort -r | tail -n +6 | cut -d'|' -f2 \
+            | xargs -I{} docker rmi couple-talk-server:{} || true

@@ -46,7 +46,24 @@ docker run -d --restart unless-stopped -p 8080:8080 -v couple-talk-data:/data co
 ```
 
 TLS는 앞단에 둡니다. `server/Caddyfile`의 도메인을 바꾼 뒤 `caddy run`을 실행하면 인증서가 자동으로 발급됩니다. 앱에서는 서버 주소를 `wss://도메인`으로 입력합니다.
-환경변수는 `PORT`(기본 8080)와 `DB_PATH`(기본 `data.db`) 두 개입니다. Docker 없이 실행하려면 Node 22.13 이상에서 `npm ci && npm start`를 실행합니다.
+환경변수는 `PORT`(기본 8080), `METRICS_PORT`(기본 9464), `DB_PATH`(기본 `data.db`)입니다. `PORT`는 WebSocket과 상태 확인용 `GET /healthz`만 답하고, 연결 수·방 수·메시지 수 지표(`GET /metrics`, Prometheus 형식)는 `METRICS_PORT`에서만 나갑니다. 지표에 방 ID나 내용은 들어가지 않습니다. `METRICS_PORT`는 외부에 열지 마세요. Docker 없이 실행하려면 Node 22.13 이상에서 `npm ci && npm start`를 실행합니다.
+
+### 맥미니 운영 서버
+
+`wss://couple-talk.tpsg.co.kr`은 맥미니에서 `server/docker-compose.yml`로 떠 있고 Cloudflare 터널이 공개합니다.
+
+- **배포**: `server/`를 바꾼 PR이 `main`에 머지되면 맥미니 self-hosted runner(라벨 `couple-talk-macmini`)에서 `.github/workflows/deploy-server.yml`이 테스트, 이미지 빌드(커밋 SHA 태그), 교체, 터널 너머 `/healthz` 확인까지 합니다. 이미지는 최근 5개만 남깁니다.
+- **롤백**: Actions에서 `deploy server`를 수동 실행하고 `sha`에 되돌릴 커밋을 넣습니다.
+- **모니터링**: mac-infra의 Prometheus가 `couple-talk-server:9464/metrics`를 수집하고, 서버가 1분 넘게 응답하지 않으면 Alertmanager가 메일을 보냅니다.
+- **백업**: DB에는 암호문만 있습니다. 서버를 켠 채로 사본을 만들 수 있습니다.
+
+```sh
+docker exec couple-talk-server node -e "new (require('node:sqlite').DatabaseSync)('/data/data.db').exec(\"VACUUM INTO '/data/backup.db'\")"
+docker cp couple-talk-server:/data/backup.db ./couple-talk-$(date +%F).db
+docker exec couple-talk-server rm /data/backup.db
+```
+
+복원은 서버를 멈추고 사본을 `data` 볼륨의 `data.db`로 넣은 뒤 다시 띄웁니다.
 
 ## 앱 빌드
 

@@ -1,9 +1,11 @@
 // Content-blind relay: stores and forwards opaque encrypted blobs per room.
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 
 const PORT = Number(process.env.PORT ?? 8080);
+const METRICS_PORT = Number(process.env.METRICS_PORT ?? 9464);
 const DB_PATH = process.env.DB_PATH ?? 'data.db';
 const LOCAL_TTL_MS = 7 * 24 * 3600 * 1000;
 const HISTORY_LIMIT = 500;
@@ -32,6 +34,7 @@ if (!db.prepare('PRAGMA table_info(messages)').all().some((c) => c.name === 'rec
   db.exec(`ALTER TABLE messages ADD COLUMN receipt TEXT NOT NULL DEFAULT ''`);
 const q = {
   room: db.prepare('SELECT token_hash, mode FROM rooms WHERE id = ?'),
+  countRooms: db.prepare('SELECT count(*) AS n FROM rooms'),
   addRoom: db.prepare('INSERT INTO rooms (id, token_hash, mode) VALUES (?, ?, ?)'),
   add: db.prepare('INSERT INTO messages (room_id, sender, ts, blob, receipt) VALUES (?, ?, ?, ?, ?) RETURNING id'),
   since: db.prepare('SELECT id, ts, blob FROM messages WHERE room_id = ? AND id > ? ORDER BY id DESC LIMIT ?'),
@@ -88,6 +91,7 @@ function handle(ws, m) {
     if (limited(ws)) return 'rate limited';
     const now = Date.now();
     const { id } = q.add.get(ws.roomId, ws.device, now, m.blob, m.receipt);
+    messagesTotal++;
     const out = JSON.stringify({ op: 'msg', id, ts: now, blob: m.blob });
     for (const peer of rooms.get(ws.roomId)) peer.send(out);
   } else if (m.op === 'put') {
@@ -108,7 +112,24 @@ function handle(ws, m) {
   } else return 'unknown op';
 }
 
-const wss = new WebSocketServer({ port: PORT, maxPayload: PACK_MAX + 1024 });
+// PORT is what the tunnel exposes publicly, so besides WebSockets it only answers a liveness check.
+const http = createServer((req, res) => {
+  if (req.url !== '/healthz') return res.writeHead(404).end();
+  try { q.room.get(''); res.end('ok'); } catch { res.writeHead(503).end('db unavailable'); }
+});
+let messagesTotal = 0;
+// Counts only, never room ids or content. Served on a port that only the internal docker network reaches.
+createServer((req, res) => {
+  if (req.url !== '/metrics') return res.writeHead(404).end();
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4');
+  res.end([
+    '# TYPE couple_talk_connections gauge', `couple_talk_connections ${wss.clients.size}`,
+    '# TYPE couple_talk_rooms_online gauge', `couple_talk_rooms_online ${rooms.size}`,
+    '# TYPE couple_talk_rooms gauge', `couple_talk_rooms ${q.countRooms.get().n}`,
+    '# TYPE couple_talk_messages_total counter', `couple_talk_messages_total ${messagesTotal}`,
+  ].join('\n') + '\n');
+}).listen(METRICS_PORT);
+const wss = new WebSocketServer({ server: http, maxPayload: PACK_MAX + 1024 });
 wss.on('error', console.error);
 // Cloudflare drops WebSockets idle for ~100s, and half-open sockets otherwise linger in `rooms`.
 setInterval(() => {
@@ -132,4 +153,5 @@ wss.on('connection', (ws) => {
     if (set?.delete(ws) && set.size === 0) rooms.delete(ws.roomId);
   });
 });
-console.log(`couple-talk relay on :${PORT}, db=${DB_PATH}`);
+http.listen(PORT);
+console.log(`couple-talk relay on :${PORT} (metrics :${METRICS_PORT}), db=${DB_PATH}`);
