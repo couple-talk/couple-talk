@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Regenerate (any OS): in app/, run `npx tauri icon src-tauri/icons/source.svg`, then delete
+       src-tauri/icons/android, src-tauri/icons/ios and src-tauri/icons/64x64.png (not in bundle.icon). -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#fff1f4"/>
