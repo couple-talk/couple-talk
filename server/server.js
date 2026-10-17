@@ -17,6 +17,11 @@ const PACK_PART = 192 * 1024;
 const PACKS_PER_ROOM = 4;
 // A client that requests packs but never reads its socket would otherwise grow our send buffer without bound.
 const SEND_BUFFER_MAX = 16 * 1024 * 1024;
+// Unfinished uploads are held in memory, so they are capped across all sockets and dropped when they stall.
+const UPLOADS_MAX = 128 * 1024 * 1024;
+const UPLOAD_IDLE_MS = 30_000;
+let uploading = 0;
+const dropUpload = (ws) => { if (ws.upload) { uploading -= ws.upload.size; ws.upload = null; } };
 // ponytail: global cap on new rooms stops disk-filling spam but also blocks real sign-ups during an attack; per-IP limits need trusted proxy headers.
 const NEW_ROOMS_PER_HOUR = Number(process.env.NEW_ROOMS_PER_HOUR ?? 50);
 
@@ -97,14 +102,17 @@ function handle(ws, m) {
     for (const peer of rooms.get(ws.roomId)) peer.send(out);
   } else if (m.op === 'put') {
     // Parts must arrive in order on one socket: {hash, part: 0..parts-1, parts, data}.
-    const up = m.part === 0 ? { hash: m.hash, chunks: [], size: 0 } : ws.upload;
-    ws.upload = null;
+    const held = ws.upload && Date.now() - ws.upload.at < UPLOAD_IDLE_MS ? ws.upload : null;
+    dropUpload(ws);
+    const up = m.part === 0 ? { hash: m.hash, chunks: [], size: 0 } : held;
     if (!ID_RE.test(m.hash) || typeof m.data !== 'string' || m.data.length > PACK_PART || !Number.isInteger(m.parts)
       || m.parts < 1 || m.parts > Math.ceil(PACK_MAX / PACK_PART) || up?.hash !== m.hash || m.part !== up.chunks.length) return 'bad request';
+    if (up.size + m.data.length > PACK_MAX) return 'bad request';
+    if (uploading + up.size + m.data.length > UPLOADS_MAX) return 'busy';
     up.chunks.push(m.data);
     up.size += m.data.length;
-    if (up.size > PACK_MAX) return 'bad request';
-    if (m.part < m.parts - 1) { ws.upload = up; return; }
+    up.at = Date.now();
+    if (m.part < m.parts - 1) { ws.upload = up; uploading += up.size; return; }
     const blob = up.chunks.join('');
     // Content-addressed: the hash is checked here, so a client can't store a blob under someone else's hash.
     if (m.hash !== sha256b64(blob)) return 'bad request';
@@ -145,6 +153,7 @@ wss.on('connection', (ws) => {
     if (err) { ws.send(JSON.stringify({ op: 'error', error: err, hash })); if (!ws.roomId) ws.close(); }
   });
   ws.on('close', () => {
+    dropUpload(ws);
     const set = rooms.get(ws.roomId);
     if (set?.delete(ws) && set.size === 0) rooms.delete(ws.roomId);
   });
