@@ -119,12 +119,22 @@ async function receive(it: Item, live: boolean, mode: Mode) {
   await render(it, live);
 }
 
+// A decrypted payload still comes from the partner's client; a bad one must not break rendering forever.
+function isValid(p: unknown): p is Payload {
+  const o = p as Record<string, unknown> | null;
+  if (!o || typeof o !== 'object' || typeof o.from !== 'string') return false;
+  if (o.type === 'chat') return typeof o.text === 'string';
+  if (o.type === 'status') return typeof o.emoji === 'string' && typeof o.text === 'string';
+  return o.type === 'action' && typeof o.kind === 'string' && Object.hasOwn(ACTIONS, o.kind);
+}
+
 async function render(it: Item, live: boolean) {
   if (seen.has(it.id)) return;
   seen.add(it.id);
   lastId = Math.max(lastId, it.id);
   let p: Payload;
   try { p = await open<Payload>(room.key, it.blob); } catch { return; }
+  if (!isValid(p)) return;
   const mine = p.from === config!.nick;
   const time = new Date(it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const row = document.createElement('div');
@@ -138,7 +148,7 @@ async function render(it: Item, live: boolean) {
     row.innerHTML = '<span class="text"></span> <span class="time"></span>';
     row.querySelector('.text')!.textContent = p.type === 'status'
       ? `${p.from} · ${p.emoji} ${p.text}`
-      : `${p.from}님이 ${ACTIONS[p.kind]?.join(' ') ?? p.kind}`;
+      : `${p.from}님이 ${ACTIONS[p.kind].join(' ')}`;
     if (p.type === 'status' && !mine) {
       partnerStatus = p.emoji;
       $('#partner').textContent = `${p.from} ${p.emoji} ${p.text}`;
