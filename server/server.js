@@ -65,7 +65,10 @@ function handle(ws, m) {
 }
 
 const wss = new WebSocketServer({ port: PORT, maxPayload: 64 * 1024 });
+wss.on('error', console.error);
 wss.on('connection', (ws) => {
+  // Oversized or malformed frames emit 'error'; without a listener they crash the process.
+  ws.on('error', () => ws.terminate());
   ws.on('message', (data) => {
     let err;
     try { err = handle(ws, JSON.parse(data)); } catch { err = 'bad request'; }

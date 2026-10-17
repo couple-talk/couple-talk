@@ -57,6 +57,15 @@ try {
   const lb2 = await client({ ...lroom, device: devB });
   assert.deepEqual((await lb2.next()).items, []);
 
+  // oversized frame must not take the relay down
+  const big = new WebSocket(`ws://localhost:${PORT}`);
+  await new Promise((r) => big.on('open', r));
+  big.send('x'.repeat(70 * 1024));
+  await new Promise((r) => big.on('close', r));
+  const alive = await client({ roomId: id(), token: id(), device: id() });
+  assert.equal((await alive.next()).op, 'ready');
+  alive.close();
+
   console.log('server ok');
   for (const ws of [a, b, c, la, lb, lb2]) ws.close();
 } finally {
