@@ -80,7 +80,16 @@ function handle(ws, m) {
 
 const wss = new WebSocketServer({ port: PORT, maxPayload: 64 * 1024 });
 wss.on('error', console.error);
+// Cloudflare drops WebSockets idle for ~100s, and half-open sockets otherwise linger in `rooms`.
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.alive === false) { ws.terminate(); continue; }
+    ws.alive = false;
+    ws.ping();
+  }
+}, 30_000).unref();
 wss.on('connection', (ws) => {
+  ws.on('pong', () => { ws.alive = true; });
   // Oversized or malformed frames emit 'error'; without a listener they crash the process.
   ws.on('error', () => ws.terminate());
   ws.on('message', (data) => {
