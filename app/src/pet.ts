@@ -88,12 +88,23 @@ function heart(cls: string, left: number, top: number, delay: number, dx = 0) {
   pet.append(h);
 }
 
+const SAY_CHARS = 40;
+const segmenter = new Intl.Segmenter();
+/** Collapses whitespace and cuts at SAY_CHARS graphemes so emoji and Hangul never split. */
+function clip(text: string) {
+  const g = Array.from(segmenter.segment(text.replace(/\s+/g, ' ').trim()), (s) => s.segment);
+  return g.length > SAY_CHARS ? `${g.slice(0, SAY_CHARS).join('')}…` : g.join('');
+}
+
 let bubbleTimer = 0;
-function react(r: Reaction) {
+/** With `say`, the bubble shows that message instead of the reaction emoji, longer for longer text. */
+function react(r: Reaction, say?: string) {
   reactPose = r.pose;
   reactUntil = Date.now() + REACT_MS;
-  bubble.textContent = r.emoji ?? '';
-  bubble.classList.toggle('on', !!r.emoji);
+  const text = say ? clip(say) : '';
+  bubble.textContent = text || r.emoji || '';
+  bubble.classList.toggle('on', !!(text || r.emoji));
+  bubble.classList.toggle('say', !!text);
   pet.classList.remove('jump', 'shake', 'squish');
   void pet.offsetWidth; // restart the CSS animation
   pet.classList.add(r.anim);
@@ -103,7 +114,8 @@ function react(r: Reaction) {
     for (let i = 0; i < 3; i++) heart('fly', hx, manifest.hand[1] * 100, 200 + i * 250, (left ? -1 : 1) * (20 + i * 8));
   }
   clearTimeout(bubbleTimer);
-  bubbleTimer = window.setTimeout(() => { bubble.classList.remove('on'); pet.classList.remove(r.anim); }, REACT_MS);
+  const ms = text ? Math.min(8000, 3000 + 100 * text.length) : REACT_MS;
+  bubbleTimer = window.setTimeout(() => { bubble.classList.remove('on'); pet.classList.remove(r.anim); }, ms);
 }
 
 await listen<PetEvent>('pet', async ({ payload: e }) => {
@@ -121,7 +133,7 @@ await listen<PetEvent>('pet', async ({ payload: e }) => {
   }
   const r = REACTIONS[e.type === 'chat' ? 'chat' : e.kind + (e.from === who ? '' : ':hit')];
   if (!r) return;
-  if (r.fx !== 'hit') return react(r);
+  if (r.fx !== 'hit') return react(r, e.type === 'chat' ? e.text : undefined);
   heart('incoming', -10, 50, 0);
   setTimeout(() => react(r), 450);
 });
