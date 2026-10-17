@@ -154,7 +154,8 @@ function isValid(p: unknown): p is Payload {
   if ((o.n !== undefined && typeof o.n !== 'string') || (o.at !== undefined && typeof o.at !== 'number')) return false;
   if (o.type === 'chat') return typeof o.text === 'string';
   if (o.type === 'status') return typeof o.emoji === 'string' && typeof o.text === 'string';
-  if (o.type === 'character') return (o.pack === null || (typeof o.pack === 'string' && /^[\w-]{43}$/.test(o.pack))) && typeof o.name === 'string';
+  if (o.type === 'character')
+    return (o.pack === null || (typeof o.pack === 'string' && /^[\w-]{43}$/.test(o.pack))) && typeof o.name === 'string' && o.name.length <= 20;
   return o.type === 'action' && typeof o.kind === 'string' && Object.hasOwn(ACTIONS, o.kind);
 }
 
@@ -187,7 +188,11 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
       : p.type === 'character'
         ? `${p.from}님이 캐릭터를 바꿨어요: ${p.name}`
         : `${p.from}님이 ${ACTIONS[p.kind].join(' ')}`;
-    if (p.type === 'character') applyCharacter(mine ? 'me' : 'partner', p.pack);
+    // Replayed history only records the latest choice; it is applied once the replay is done (onReady).
+    if (p.type === 'character') {
+      if (live) applyCharacter(mine ? 'me' : 'partner', p.pack);
+      else wanted[mine ? 'me' : 'partner'] = p.pack;
+    }
     if (p.type === 'status') {
       statuses[mine ? 'me' : 'partner'] = p.emoji;
       if (!mine) $('#partner').textContent = `${p.from} ${p.emoji} ${p.text}`;
@@ -208,7 +213,7 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
 
 // History replays every character change in order; only the newest one per side may land.
 const charSeq: Record<Who, number> = { me: 0, partner: 0 };
-// Retried on reconnect so one failed download doesn't stick until the partner changes again.
+// Applied after each history replay, which also retries a failed download on reconnect.
 const wanted: Partial<Record<Who, string | null>> = {};
 
 async function applyCharacter(who: Who, hash: string | null) {
@@ -228,8 +233,9 @@ async function applyCharacter(who: Who, hash: string | null) {
       const files: Files = Object.fromEntries(Object.entries(sealed.files).map(([k, v]) => [k, unb64(v)]));
       const report = await checkPack(files);
       if (!report.manifest) throw new Error(report.errors[0]);
+      const stored = await toStored(hash, report.manifest, files);
       if (seq !== charSeq[who]) return;
-      await savePack(who, await toStored(hash, report.manifest, files));
+      await savePack(who, stored);
     }
     if (seq !== charSeq[who]) return;
     petEmit({ type: 'reload' });
@@ -255,16 +261,21 @@ async function importPack(list: FileList) {
   for (const w of r.warnings) note(`⚠️ ${w}`);
   if (!r.manifest) return;
   note('검사 통과. 암호화해서 보내는 중…');
-  const used = ['manifest.json', ...new Set(Object.values(r.manifest.poses).flat())];
-  const blob = await seal(room.key, { files: Object.fromEntries(used.map((f) => [f, b64(files[f])])) });
-  const hash = await receiptOf(blob);
-  try { await net.putPack(hash, blob); } catch (e) {
+  // Old relays close the socket on a big frame, so ask a tiny question first to get a clear answer.
+  try { await net.getPack('A'.repeat(43)); } catch (e) {
     const msg = (e as Error).message;
     note(msg === 'unknown op' ? '이 서버는 캐릭터 팩 전송을 지원하지 않아요. 서버를 업데이트해 주세요.' : `보내지 못했어요 (${msg})`, 'error');
     return;
   }
+  const used = ['manifest.json', ...new Set(Object.values(r.manifest.poses).flat())];
+  const blob = await seal(room.key, { files: Object.fromEntries(used.map((f) => [f, b64(files[f])])) });
+  const hash = await receiptOf(blob);
+  try { await net.putPack(hash, blob); } catch (e) { note(`보내지 못했어요 (${(e as Error).message})`, 'error'); return; }
+  // Saved before announcing so my own echo doesn't download the pack again; undone if the announcement fails.
+  const prev = await storedPack('me');
   await savePack('me', await toStored(hash, r.manifest, files));
   if (await sendPayload({ type: 'character', pack: hash, name: r.manifest.name })) note(`✅ ${r.manifest.name}(으)로 바꿨어요. 상대 화면에도 보여요.`);
+  else { await savePack('me', prev ?? null); note('연결이 끊겨서 바꾸지 못했어요. 다시 시도해 주세요.', 'error'); }
 }
 
 async function sendPayload(p: Record<string, unknown>) {

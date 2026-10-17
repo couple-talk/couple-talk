@@ -39,11 +39,16 @@ function draw() {
   const src = url(f[frame % f.length]);
   if (body.getAttribute('src') !== src) body.src = src;
 }
-setInterval(() => {
-  // idle's second frame is a blink, so flash it now and then instead of cycling.
-  frame = pose === 'idle' ? +(Math.random() < 0.06) : frame + 1;
-  draw();
-}, 1000 / manifest.fps);
+let frameTimer = 0;
+const animate = () => {
+  clearInterval(frameTimer);
+  frameTimer = window.setInterval(() => {
+    // idle's second frame is a blink, so flash it now and then instead of cycling.
+    frame = pose === 'idle' ? +(Math.random() < 0.06) : frame + 1;
+    draw();
+  }, 1000 / manifest.fps);
+};
+animate();
 
 // Walk the window itself along the bottom of the work area, so no click-through handling is needed.
 const monitor = await currentMonitor();
@@ -110,6 +115,7 @@ await listen<PetEvent>('pet', async ({ payload: e }) => {
   if (e.type === 'reload') {
     ({ manifest, url } = await loadPack(who));
     preload();
+    animate();
     draw();
     return;
   }
