@@ -1,0 +1,4 @@
+# Replace with your domain. Caddy fetches a TLS certificate automatically.
+talk.example.com {
+	reverse_proxy localhost:8080
+}
