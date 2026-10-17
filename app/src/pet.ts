@@ -78,6 +78,7 @@ let statusPose = '';
 let statusUntil = 0;
 
 setInterval(() => {
+  if (!shown) return; // hidden partner window: x stays frozen with it, so show() does not jump
   const now = Date.now();
   const walking = now > pauseUntil && now > reactUntil && now > statusUntil;
   const next = now < reactUntil ? reactPose : now < statusUntil ? statusPose : walking ? 'walk' : 'idle';
