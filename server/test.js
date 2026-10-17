@@ -14,7 +14,8 @@ const DB_PATH = join(mkdtempSync(join(tmpdir(), 'ct-')), 'test.db');
 new DatabaseSync(DB_PATH).exec(`CREATE TABLE messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, sender TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL)`);
 const srv = spawn('node', ['server.js'], {
-  env: { ...process.env, PORT, DB_PATH },
+  // Small upload budget and fast heartbeat so the stalled-upload case runs in under a second.
+  env: { ...process.env, PORT, DB_PATH, UPLOADS_MAX: 550 * 1024, UPLOAD_IDLE_MS: 300, HEARTBEAT_MS: 100 },
   stdio: 'inherit',
 });
 await new Promise((r) => setTimeout(r, 500));
@@ -105,7 +106,21 @@ try {
   await other.next();
   other.put({ op: 'get', hash: sha(pack) });
   assert.equal((await other.next()).blob, null, 'packs are room-scoped');
-  for (const ws of [pa, pb, other]) ws.close();
+  // a stalled upload must not hold the global upload budget
+  const sa = await client({ ...room, device: id() });
+  await sa.next();
+  const sb = await client({ ...room, device: id() });
+  await sb.next();
+  const stalled = id();
+  for (let i = 0; i < 2; i++) sa.put({ op: 'put', hash: stalled, part: i, parts: 3, data: 'A'.repeat(PART) });
+  await new Promise((r) => setTimeout(r, 100));
+  const small = 'B'.repeat(190 * 1024);
+  sb.put({ op: 'put', hash: sha(small), part: 0, parts: 1, data: small });
+  assert.equal((await sb.next()).error, 'busy');
+  await new Promise((r) => setTimeout(r, 600));
+  sb.put({ op: 'put', hash: sha(small), part: 0, parts: 1, data: small });
+  assert.deepEqual(await sb.next(), { op: 'stored', hash: sha(small) }, 'stalled upload released by heartbeat');
+  for (const ws of [pa, pb, other, sa, sb]) ws.close();
 
   // per-socket send rate limit
   const spam = await client({ roomId: id(), token: id(), device: id() });

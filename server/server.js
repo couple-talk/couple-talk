@@ -18,8 +18,9 @@ const PACKS_PER_ROOM = 4;
 // A client that requests packs but never reads its socket would otherwise grow our send buffer without bound.
 const SEND_BUFFER_MAX = 16 * 1024 * 1024;
 // Unfinished uploads are held in memory, so they are capped across all sockets and dropped when they stall.
-const UPLOADS_MAX = 128 * 1024 * 1024;
-const UPLOAD_IDLE_MS = 30_000;
+const UPLOADS_MAX = Number(process.env.UPLOADS_MAX ?? 128 * 1024 * 1024);
+const UPLOAD_IDLE_MS = Number(process.env.UPLOAD_IDLE_MS ?? 30_000);
+const HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS ?? 30_000);
 let uploading = 0;
 const dropUpload = (ws) => { if (ws.upload) { uploading -= ws.upload.size; ws.upload = null; } };
 // ponytail: global cap on new rooms stops disk-filling spam but also blocks real sign-ups during an attack; per-IP limits need trusted proxy headers.
@@ -137,10 +138,12 @@ wss.on('error', console.error);
 setInterval(() => {
   for (const ws of wss.clients) {
     if (ws.alive === false) { ws.terminate(); continue; }
+    // A socket that stops mid-upload stays alive on pongs, so release its bytes here too.
+    if (ws.upload && Date.now() - ws.upload.at >= UPLOAD_IDLE_MS) dropUpload(ws);
     ws.alive = false;
     ws.ping();
   }
-}, 30_000).unref();
+}, HEARTBEAT_MS).unref();
 wss.on('connection', (ws) => {
   ws.on('pong', () => { ws.alive = true; });
   // Oversized or malformed frames emit 'error'; without a listener they crash the process.
