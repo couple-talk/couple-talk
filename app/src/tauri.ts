@@ -1,11 +1,14 @@
 // Thin wrappers so the main window also runs in a plain browser (no pet there).
 export const isTauri = '__TAURI_INTERNALS__' in window;
 
-/** OS-keychain device key, or null in a plain browser. Throws if the keychain is unavailable. */
-export async function deviceKey(): Promise<Uint8Array<ArrayBuffer> | null> {
+/**
+ * OS-keychain device key, or null in a plain browser. `create` mints one if absent;
+ * otherwise a missing key rejects with "missing". Rejects if the keychain is unavailable.
+ */
+export async function deviceKey(create: boolean): Promise<Uint8Array<ArrayBuffer> | null> {
   if (!isTauri) return null;
   const { invoke } = await import('@tauri-apps/api/core');
-  const fresh = Array.from(crypto.getRandomValues(new Uint8Array(32)));
+  const fresh = create ? Array.from(crypto.getRandomValues(new Uint8Array(32))) : null;
   return new Uint8Array(await invoke<number[]>('device_key', { fresh }));
 }
 

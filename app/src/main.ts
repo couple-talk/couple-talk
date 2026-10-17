@@ -38,15 +38,17 @@ async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: stri
   if (u.protocol !== 'wss:' && !(u.protocol === 'ws:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)))
     throw new Error('서버 주소는 wss:// 로 시작해야 해요 (로컬 테스트만 ws:// 허용)');
   if (!nick.trim()) throw new Error('닉네임을 입력해 주세요');
-  const pepper = await loadDeviceKey();
+  const pepper = await loadDeviceKey(true);
   config = { server, wrapped: await wrapSecret(secret, pin, pepper), peppered: !!pepper, nick: nick.trim(), mode, device: randomId() };
   save('ct.config', config);
   await start(secret);
 }
 
-async function loadDeviceKey() {
-  try { return (await deviceKey()) ?? undefined; } catch (e) {
-    throw new Error(`OS 키체인을 쓸 수 없어요 (${e}). 이 PC를 초기화하고 페어링 코드로 다시 연결해 주세요.`);
+async function loadDeviceKey(create: boolean) {
+  try { return (await deviceKey(create)) ?? undefined; } catch (e) {
+    throw new Error(e === 'missing'
+      ? '이 PC의 키체인에서 기기 키를 찾을 수 없어요. 아래 "초기화" 후 페어링 코드로 다시 연결해 주세요.'
+      : `OS 키체인을 쓸 수 없어요 (${e}). 이 PC를 초기화하고 페어링 코드로 다시 연결해 주세요.`);
   }
 }
 
@@ -74,8 +76,14 @@ bindForm('#join-form', async (f) => {
 
 bindForm('#unlock-form', async (f) => {
   let secret: Bytes;
-  const pepper = config!.peppered ? await loadDeviceKey() : undefined;
-  try { secret = await unwrapSecret(config!.wrapped, String(f.get('pin')), pepper); } catch { throw new Error('비밀번호가 틀렸어요'); }
+  const pin = String(f.get('pin'));
+  const pepper = config!.peppered ? await loadDeviceKey(false) : undefined;
+  try { secret = await unwrapSecret(config!.wrapped, pin, pepper); } catch { throw new Error('비밀번호가 틀렸어요'); }
+  if (!config!.peppered) {
+    // Configs from before the keychain pepper get upgraded on their first unlock.
+    const fresh = await loadDeviceKey(true);
+    if (fresh) save('ct.config', (config = { ...config!, wrapped: await wrapSecret(secret, pin, fresh), peppered: true }));
+  }
   await start(secret);
 });
 
