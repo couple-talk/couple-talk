@@ -32,6 +32,7 @@ export async function applyCharacter(who: Who, hash: string | null, id: number) 
       const stored = await toStored(hash, report.manifest, files);
       if (seq !== charSeq[who]) return;
       await savePack(who, stored);
+      if (who === 'me') await keepPack(stored); // picked on my other PC: still mine to pick again here
     }
     if (seq !== charSeq[who]) return;
     petEmit({ type: 'reload' });

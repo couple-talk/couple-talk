@@ -136,10 +136,18 @@ export type Who = 'me' | 'partner';
 /** `hash` identifies the sealed pack on the relay; files are data: URLs so the CSP needs no blob: source. */
 export type StoredPack = { hash: string; manifest: Manifest; files: Record<string, string> };
 
+// My imported packs, kept by manifest id so they can be picked again without the files.
+const LIB = 'lib:';
+
 function store<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest) {
   return new Promise<T>((ok, fail) => {
-    const req = indexedDB.open('ct-packs', 1);
-    req.onupgradeneeded = () => req.result.createObjectStore('packs');
+    const req = indexedDB.open('ct-packs', 2);
+    req.onupgradeneeded = ({ oldVersion }) => {
+      if (oldVersion < 1) { req.result.createObjectStore('packs'); return; }
+      // v2 added the kept list; a pack imported before it lives only in 'me'. Copied once here, so deleting it later sticks.
+      const s = req.transaction!.objectStore('packs'), me = s.get('me');
+      me.onsuccess = () => { if (me.result) s.put(me.result, LIB + me.result.manifest.id); };
+    };
     req.onerror = () => fail(req.error);
     req.onsuccess = () => {
       // Close right away (the transaction still completes): an open connection in a pet window blocks deleteDatabase on reset.
@@ -154,8 +162,6 @@ function store<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReques
 export const savePack = (who: Who, p: StoredPack | null) => store<void>('readwrite', (s) => (p ? s.put(p, who) : s.delete(who)));
 export const storedPack = (who: Who) => store<StoredPack | undefined>('readonly', (s) => s.get(who));
 
-// My imported packs, kept by manifest id so they can be picked again without the files.
-const LIB = 'lib:';
 export const keepPack = (p: StoredPack) => store<void>('readwrite', (s) => s.put(p, LIB + p.manifest.id));
 export const dropPack = (id: string) => store<void>('readwrite', (s) => s.delete(LIB + id));
 export const keptPacks = () => store<StoredPack[]>('readonly', (s) => s.getAll(IDBKeyRange.bound(LIB, LIB + '￿')));
