@@ -243,13 +243,14 @@ pet.onpointerup = pet.onpointercancel = async () => {
   dragged = d.moved; // read by the click that follows this pointerup
   drag = null;
   pet.classList.remove('dragging');
-  if (!dragged || !d.win) return;
+  if (!dragged) return;
+  pauseUntil = Date.now() + 1500; // also undoes the Infinity from a flick released before outerPosition() resolved
+  if (!d.win) return;
   // Land on the floor of whichever monitor the OS says the window ended up on, and stand there a moment.
   while (following) await new Promise((r) => requestAnimationFrame(r));
   const m = await currentMonitor();
   if (m) area = toArea(m);
   x = Math.min(Math.max(d.win.x + d.cx - d.sx + half(), minX()), maxX());
-  pauseUntil = Date.now() + 1500;
   await place();
 };
 
