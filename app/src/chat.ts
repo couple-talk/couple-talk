@@ -3,6 +3,7 @@ import { deriveRoom, open, randomId, receiptOf, seal, type Bytes, type Room } fr
 import { applyCharacter, wanted } from './characters';
 import { connect, type Item } from './net';
 import type { Who } from './pack';
+import { connected, receiveSignal, rendered, startPresence } from './presence';
 import { ACTIONS, isValid, STATUSES, type Mode, type Payload } from './protocol';
 import { $, config, load, save, show } from './state';
 import { petEmit, petListen } from './tauri';
@@ -24,6 +25,7 @@ export async function start(secret: Bytes) {
   show('chat');
   $('#me').textContent = config!.nick;
   const local = load<Item[]>('ct.history', []);
+  startPresence();
   if (config!.mode === 'local') for (const it of local) await render(it, false);
 
   net = connect(config!.server, { roomId: room.roomId, token: room.token, device: config!.device, mode: config!.mode }, () => lastId, {
@@ -34,8 +36,10 @@ export async function start(secret: Bytes) {
     onReady: async (mode, items) => {
       for (const it of items) await receive(it, false, mode);
       for (const who of ['me', 'partner'] as const) { const w = wanted[who]; if (w) applyCharacter(who, w.pack, w.id); }
+      connected();
     },
     onMsg: (it) => receive(it, true, config!.mode),
+    onSignal: receiveSignal,
   });
 }
 
@@ -73,7 +77,9 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
     row.className = `msg ${mine ? 'mine' : 'theirs'}`;
     row.innerHTML = '<span class="bubble"></span><span class="time"></span>';
     row.querySelector('.bubble')!.textContent = p.text;
+    rendered(it.id, mine, live, mine ? row : undefined);
   } else {
+    rendered(it.id, mine, live);
     row.className = 'event';
     row.innerHTML = '<span class="text"></span> <span class="time"></span>';
     row.querySelector('.text')!.textContent = p.type === 'status'

@@ -73,6 +73,7 @@ $('#reset').onclick = async (e) => {
   localStorage.removeItem('ct.config');
   localStorage.removeItem('ct.history');
   localStorage.removeItem('ct.partner');
+  localStorage.removeItem('ct.presence');
   await new Promise((done) => { const r = indexedDB.deleteDatabase('ct-packs'); r.onsuccess = r.onerror = r.onblocked = done; });
   // Awaited so the pets drop the old name tags and characters before this page navigates away.
   await petEmit({ type: 'reload' }).catch(() => {});
