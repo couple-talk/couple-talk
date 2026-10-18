@@ -72,6 +72,10 @@ const monitor = await currentMonitor();
 const area = monitor!.workArea;
 const scale = monitor!.scaleFactor;
 const bottom = area.position.y + area.size.height;
+// The line the pet walks on (window bottom edge). Dragging moves it; it starts on the taskbar edge.
+let floor = bottom;
+// Highest floor that still leaves room for the grown window, so a bubble is never cut off at the top.
+const topFloor = () => area.position.y + BIG.h * scale;
 let size = SMALL;
 // The two windows can't see each other's position, so each walks its own half and they never overlap.
 const mid = area.position.x + area.size.width / 2;
@@ -82,7 +86,7 @@ const minX = () => (who === 'me' ? area.position.x : mid + gap) + half();
 const maxX = () => (who === 'me' ? mid - gap : area.position.x + area.size.width) - half();
 let x = maxX() - 40 * scale;
 let dir = -1;
-const place = () => win.setPosition(new PhysicalPosition(Math.round(x - half()), Math.round(bottom - size.h * scale)));
+const place = () => win.setPosition(new PhysicalPosition(Math.round(x - half()), Math.round(floor - size.h * scale)));
 async function resize(next: typeof SMALL) {
   if (next === size) return;
   size = next;
@@ -189,7 +193,40 @@ await listen<PetEvent>('pet', async ({ payload: e }) => {
 });
 await emit('pet-hello');
 
+// Drag the window by hand rather than with startDragging(): the walk loop needs the drop point as its new x/floor,
+// and a short press must still open the chat. Pointer capture keeps events coming when the cursor outruns the window.
+const DRAG_PX = 4;
+let drag: { sx: number; sy: number; x: number; floor: number; moved: boolean } | null = null;
+let dragged = false;
+let placing = false;
+pet.onpointerdown = (e) => {
+  if (e.button !== 0) return;
+  pet.setPointerCapture(e.pointerId);
+  drag = { sx: e.screenX, sy: e.screenY, x, floor, moved: false };
+};
+pet.onpointermove = (e) => {
+  if (!drag) return;
+  const dx = e.screenX - drag.sx, dy = e.screenY - drag.sy;
+  if (!drag.moved && Math.hypot(dx, dy) < DRAG_PX) return;
+  drag.moved = true;
+  pet.classList.add('dragging');
+  pauseUntil = Infinity;
+  // screenX/Y are logical pixels; the window works in physical ones. Stay in this pet's half (see minX/maxX).
+  x = Math.min(Math.max(drag.x + dx * scale, minX()), maxX());
+  floor = Math.min(Math.max(drag.floor + dy * scale, topFloor()), bottom);
+  if (!placing) { placing = true; requestAnimationFrame(() => { placing = false; place(); }); }
+};
+pet.onpointerup = pet.onpointercancel = () => {
+  if (!drag) return;
+  dragged = drag.moved;
+  drag = null;
+  pet.classList.remove('dragging');
+  // Stand still for a moment where it was dropped before walking on from there.
+  if (dragged) pauseUntil = Date.now() + 1500;
+};
+
 pet.onclick = async () => {
+  if (dragged) { dragged = false; return; }
   const main = await Window.getByLabel('main');
   await main?.show();
   await main?.unminimize();
