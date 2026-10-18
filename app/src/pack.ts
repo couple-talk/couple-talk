@@ -142,7 +142,10 @@ function store<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReques
     req.onupgradeneeded = () => req.result.createObjectStore('packs');
     req.onerror = () => fail(req.error);
     req.onsuccess = () => {
-      const r = fn(req.result.transaction('packs', mode).objectStore('packs'));
+      // Close right away (the transaction still completes): an open connection in a pet window blocks deleteDatabase on reset.
+      const db = req.result;
+      const r = fn(db.transaction('packs', mode).objectStore('packs'));
+      db.close();
       r.onsuccess = () => ok(r.result);
       r.onerror = () => fail(r.error);
     };
@@ -166,10 +169,10 @@ export async function toStored(hash: string, manifest: Manifest, files: Files): 
 export const BUILTIN = 'default';
 
 /** What a pet window draws: the stored pack for `who`, or the built-in character. */
-export async function loadPack(who: Who): Promise<{ manifest: Manifest; url: (file: string) => string }> {
+export async function loadPack(who: Who): Promise<{ manifest: Manifest; url: (file: string) => string; builtin: boolean }> {
   const p = await storedPack(who).catch(() => undefined);
-  if (p) return { manifest: p.manifest, url: (f) => p.files[f] };
+  if (p) return { manifest: p.manifest, url: (f) => p.files[f], builtin: false };
   const base = `/characters/${BUILTIN}/`;
   const manifest: Manifest = await (await fetch(base + 'manifest.json')).json();
-  return { manifest, url: (f) => base + f };
+  return { manifest, url: (f) => base + f, builtin: true };
 }

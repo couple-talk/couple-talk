@@ -44,6 +44,7 @@ async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: stri
   const pepper = await loadDeviceKey(true);
   config = { server, wrapped: await wrapSecret(secret, pin, pepper), peppered: !!pepper, nick: nick.trim(), mode, device: randomId() };
   save('ct.config', config);
+  petEmit({ type: 'reload' }); // the pet shows my nickname
   await start(secret);
 }
 
@@ -91,12 +92,15 @@ bindForm('#unlock-form', async (f) => {
 });
 
 // Native confirm()/alert() aren't reliable in Tauri webviews, so confirm by clicking twice.
-$('#reset').onclick = (e) => {
+$('#reset').onclick = async (e) => {
   const b = e.currentTarget as HTMLButtonElement;
   if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = '정말 지울까요? 한 번 더 누르세요'; return; }
   localStorage.removeItem('ct.config');
   localStorage.removeItem('ct.history');
-  indexedDB.deleteDatabase('ct-packs');
+  localStorage.removeItem('ct.partner');
+  await new Promise((done) => { const r = indexedDB.deleteDatabase('ct-packs'); r.onsuccess = r.onerror = r.onblocked = done; });
+  // Awaited so the pets drop the old name tags and characters before this page navigates away.
+  await petEmit({ type: 'reload' }).catch(() => {});
   location.reload();
 };
 
@@ -173,6 +177,8 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
     seenNonces.add(p.n);
   }
   const mine = p.from === config!.nick;
+  // The partner's pet appears (with this name) once we've heard from them.
+  if (!mine && load<string | null>('ct.partner', null) !== p.from) { save('ct.partner', p.from); petEmit({ type: 'reload' }); }
   const time = new Date(p.at ?? it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const row = document.createElement('div');
 
