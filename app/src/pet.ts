@@ -1,5 +1,5 @@
 import { emit, listen } from '@tauri-apps/api/event';
-import { currentMonitor, getCurrentWindow, PhysicalPosition, Window } from '@tauri-apps/api/window';
+import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition, Window } from '@tauri-apps/api/window';
 import { loadPack, type Who } from './pack';
 import type { PetEvent } from './tauri';
 
@@ -64,18 +64,33 @@ const animate = () => {
 animate();
 
 // Walk the window itself along the bottom of the work area, so no click-through handling is needed.
+// The window stays small and only grows while a speech bubble or hearts are up, so it rarely blocks clicks.
+// SMALL leaves 50px above the 100px character for emoji bubbles; keep it in sync with tauri.conf.json.
+const SMALL = { w: 120, h: 150 };
+const BIG = { w: 220, h: 220 };
 const monitor = await currentMonitor();
 const area = monitor!.workArea;
 const scale = monitor!.scaleFactor;
-const winW = 120 * scale;
-const y = area.position.y + area.size.height - 130 * scale;
+const bottom = area.position.y + area.size.height;
+let size = SMALL;
 // The two windows can't see each other's position, so each walks its own half and they never overlap.
 const mid = area.position.x + area.size.width / 2;
 const gap = 20 * scale;
-const min = who === 'me' ? area.position.x : mid + gap;
-const max = who === 'me' ? mid - gap - winW : area.position.x + area.size.width - winW;
-let x = max - 40 * scale;
+// x is the character's center, so resizing the window around it doesn't move the character.
+const half = () => (size.w * scale) / 2;
+const minX = () => (who === 'me' ? area.position.x : mid + gap) + half();
+const maxX = () => (who === 'me' ? mid - gap : area.position.x + area.size.width) - half();
+let x = maxX() - 40 * scale;
 let dir = -1;
+const place = () => win.setPosition(new PhysicalPosition(Math.round(x - half()), Math.round(bottom - size.h * scale)));
+async function resize(next: typeof SMALL) {
+  if (next === size) return;
+  size = next;
+  // Keep a grown window inside its half so the bubble isn't cut and the pets don't overlap.
+  x = Math.min(Math.max(x, minX()), maxX());
+  await win.setSize(new LogicalSize(size.w, size.h));
+  await place();
+}
 let pauseUntil = 0;
 let reactPose = '';
 let reactUntil = 0;
@@ -93,11 +108,12 @@ setInterval(() => {
   if (Math.random() < 0.005) { pauseUntil = now + 2000 + Math.random() * 6000; return; }
   if (Math.random() < 0.003) dir = -dir;
   x += dir * manifest.speed * scale;
+  const min = minX(), max = maxX();
   if (x <= min || x >= max) { dir = -dir; x = Math.min(Math.max(x, min), max); }
   pet.classList.toggle('left', dir < 0);
-  win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
+  place();
 }, 50);
-win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
+place();
 
 function heart(cls: string, left: number, top: number, delay: number, dx = 0) {
   const h = document.createElement('span');
@@ -111,12 +127,26 @@ function heart(cls: string, left: number, top: number, delay: number, dx = 0) {
   pet.append(h);
 }
 
+const SAY_CHARS = 40;
+const segmenter = new Intl.Segmenter();
+/** Collapses whitespace and cuts at SAY_CHARS graphemes so emoji and Hangul never split. */
+function clip(text: string) {
+  const g = Array.from(segmenter.segment(text.replace(/\s+/g, ' ').trim()), (s) => s.segment);
+  return g.length > SAY_CHARS ? `${g.slice(0, SAY_CHARS).join('')}…` : g.join('');
+}
+
 let bubbleTimer = 0;
-function react(r: Reaction) {
+/** With `say`, the bubble shows that message instead of the reaction emoji, longer for longer text. */
+function react(r: Reaction, say?: string) {
   reactPose = r.pose;
   reactUntil = Date.now() + REACT_MS;
-  bubble.textContent = r.emoji ?? '';
-  bubble.classList.toggle('on', !!r.emoji);
+  const text = say ? clip(say) : '';
+  // Flying hearts need the side room as much as a bubble does.
+  const big = !!(text || r.fx);
+  resize(big ? BIG : SMALL);
+  bubble.textContent = text || r.emoji || '';
+  bubble.classList.toggle('on', !!(text || r.emoji));
+  bubble.classList.toggle('say', !!text);
   pet.classList.remove('jump', 'shake', 'squish');
   void pet.offsetWidth; // restart the CSS animation
   pet.classList.add(r.anim);
@@ -126,7 +156,13 @@ function react(r: Reaction) {
     for (let i = 0; i < 3; i++) heart('fly', hx, manifest.hand[1] * 100, 200 + i * 250, (left ? -1 : 1) * (20 + i * 8));
   }
   clearTimeout(bubbleTimer);
-  bubbleTimer = window.setTimeout(() => { bubble.classList.remove('on'); pet.classList.remove(r.anim); }, REACT_MS);
+  const ms = text ? Math.min(8000, 3000 + 100 * text.length) : REACT_MS;
+  bubbleTimer = window.setTimeout(() => {
+    bubble.classList.remove('on');
+    pet.classList.remove(r.anim);
+    // Shrink only after the fade-out so the bubble isn't cut mid-transition.
+    if (big) setTimeout(() => !bubble.classList.contains('on') && resize(SMALL), 250);
+  }, ms);
 }
 
 await listen<PetEvent>('pet', async ({ payload: e }) => {
@@ -146,7 +182,8 @@ await listen<PetEvent>('pet', async ({ payload: e }) => {
   }
   const r = REACTIONS[e.type === 'chat' ? 'chat' : e.kind + (e.from === who ? '' : ':hit')];
   if (!r) return;
-  if (r.fx !== 'hit') return react(r);
+  if (r.fx !== 'hit') return react(r, e.type === 'chat' ? e.text : undefined);
+  await resize(BIG); // the incoming heart starts left of the character
   heart('incoming', -10, 50, 0);
   setTimeout(() => react(r), 450);
 });
