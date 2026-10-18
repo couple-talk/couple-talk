@@ -1,5 +1,5 @@
 import { emit, emitTo, listen } from '@tauri-apps/api/event';
-import { currentMonitor, cursorPosition, getCurrentWindow, LogicalSize, monitorFromPoint, PhysicalPosition, Window, type Monitor } from '@tauri-apps/api/window';
+import { currentMonitor, getCurrentWindow, LogicalPosition, LogicalSize, PhysicalPosition, Window, type Monitor } from '@tauri-apps/api/window';
 import { loadPack, type Who } from './pack';
 import type { PetEvent } from './tauri';
 
@@ -83,7 +83,7 @@ const maxX = () => area.x + area.w - half();
 let x = who === 'me' ? area.x + area.w / 2 - 80 * area.scale : maxX() - 40 * area.scale;
 let dir = -1;
 // While dragging, the pointer owns the window position.
-let drag: { sx: number; sy: number; moved: boolean; off: { x: number; y: number } | null } | null = null;
+let drag: { sx: number; sy: number; cx: number; cy: number; moved: boolean; win: { x: number; y: number } | null } | null = null;
 const place = async () => {
   if (drag?.moved) return;
   await win.setPosition(new PhysicalPosition(Math.round(x - half()), Math.round(area.y + area.h - size.h * area.scale)));
@@ -206,30 +206,33 @@ await listen<PetEvent>('pet', async ({ payload: e }) => {
 await emit('pet-hello');
 
 // Drag the window by hand rather than with startDragging(): the drop point decides which monitor's floor the pet walks
-// on next, and a short press must still open the chat. Global cursor coordinates keep this right across monitors
-// with different scale factors; pointer capture keeps events coming when the cursor outruns the window.
+// on next, and a short press must still open the chat. Pointer capture keeps events coming when the cursor outruns
+// the window. Positions are logical while dragging: screenX/Y are global points, which on macOS stay continuous across
+// monitors with different scale factors. (Tauri's cursorPosition() mixes pixels and points on Retina macOS, so it isn't used.)
 const DRAG_PX = 4;
 let dragged = false;
 let following = false;
 pet.onpointerdown = async (e) => {
   if (e.button !== 0) return;
   pet.setPointerCapture(e.pointerId);
-  const d: NonNullable<typeof drag> = { sx: e.screenX, sy: e.screenY, moved: false, off: null };
+  const d: NonNullable<typeof drag> = { sx: e.screenX, sy: e.screenY, cx: e.screenX, cy: e.screenY, moved: false, win: null };
   drag = d;
-  const [c, w] = await Promise.all([cursorPosition(), win.outerPosition()]);
-  d.off = { x: c.x - w.x, y: c.y - w.y };
+  const [w, f] = await Promise.all([win.outerPosition(), win.scaleFactor()]);
+  d.win = w.toLogical(f);
 };
 pet.onpointermove = (e) => {
   if (!drag) return;
-  if (!drag.moved && Math.hypot(e.screenX - drag.sx, e.screenY - drag.sy) < DRAG_PX) return;
+  drag.cx = e.screenX;
+  drag.cy = e.screenY;
+  if (!drag.moved && Math.hypot(drag.cx - drag.sx, drag.cy - drag.sy) < DRAG_PX) return;
   drag.moved = true;
   pet.classList.add('dragging');
   pauseUntil = Infinity;
-  if (following || !drag.off) return;
+  if (following || !drag.win) return;
   following = true;
   requestAnimationFrame(async () => {
-    const c = await cursorPosition();
-    if (drag?.off) await win.setPosition(new PhysicalPosition(c.x - drag.off.x, c.y - drag.off.y));
+    const d = drag;
+    if (d?.win) await win.setPosition(new LogicalPosition(d.win.x + d.cx - d.sx, d.win.y + d.cy - d.sy));
     following = false;
   });
 };
@@ -239,9 +242,9 @@ pet.onpointerup = pet.onpointercancel = async () => {
   drag = null;
   pet.classList.remove('dragging');
   if (!dragged) return;
-  // Land on the floor of whichever monitor it was dropped on, and stand there a moment before walking on.
-  const c = await cursorPosition();
-  const m = (await monitorFromPoint(c.x, c.y)) ?? (await currentMonitor());
+  // Land on the floor of whichever monitor the OS says the window ended up on, and stand there a moment.
+  while (following) await new Promise((r) => requestAnimationFrame(r));
+  const m = await currentMonitor();
   if (m) area = toArea(m);
   const w = await win.outerPosition();
   x = Math.min(Math.max(w.x + half(), minX()), maxX());
