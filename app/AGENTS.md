@@ -4,6 +4,7 @@
 
 - 메인 창과 펫 창(`pet`, `pet-me`)은 출처가 같아서 localStorage와 IndexedDB(`ct-packs`)를 함께 쓴다.
 - IndexedDB 연결은 요청마다 닫는다(`pack.ts`의 `store()`). 한 창이 연결을 열어 두면 다른 창의 `deleteDatabase`가 `blocked`되고, 그 뒤에 오는 `open`도 함께 멈춘다.
+- 저장 형식을 바꾸면 이전 빌드가 남긴 데이터를 옮긴다. IndexedDB는 `ct-packs` 버전을 올리고 `onupgradeneeded`에서 한 번만 옮긴다. 렌더할 때마다 채워 넣으면 사용자가 지운 것이 되살아난다.
 - 페이지를 떠나기 직전(`location.reload()` 등)에 보내는 `petEmit`은 `await`한다. IPC가 끝나기 전에 페이지가 바뀌면 이벤트가 사라진다.
 
 ## 펫 창
