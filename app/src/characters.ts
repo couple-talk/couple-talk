@@ -53,6 +53,7 @@ async function showCharacters() {
     pick.onclick = () => pickKept(p);
     const drop = Object.assign(document.createElement('button'), { type: 'button', textContent: '지우기', className: 'link' });
     drop.onclick = async () => { await dropPack(p.manifest.id); await showCharacters(); };
+    pick.disabled = drop.disabled = busy; // re-rendered mid-send by usePack and the echo
     li.append(pick, drop);
     return li;
   }));
@@ -83,12 +84,16 @@ async function usePack(manifest: Manifest, files: Files) {
 
 // One upload at a time: picking from the list while an import is still sending would race on 'me'.
 let busy = false;
+const controls = () => document.querySelectorAll<HTMLButtonElement | HTMLInputElement>('#char-list button, #char-file, #char-default');
 
-async function pickKept(p: StoredPack) {
+async function locked(fn: () => Promise<unknown>) {
   if (busy) return;
   busy = true;
-  try { await sendKept(p); } finally { busy = false; }
+  controls().forEach((c) => (c.disabled = true));
+  try { await fn(); } finally { busy = false; controls().forEach((c) => (c.disabled = false)); }
 }
+
+const pickKept = (p: StoredPack) => locked(() => sendKept(p));
 
 async function sendKept(p: StoredPack) {
   $('#char-report').replaceChildren();
@@ -116,8 +121,7 @@ async function importPack(list: FileList) {
 $('#show-chars').onclick = () => { showCharacters(); $<HTMLDialogElement>('#char-dialog').showModal(); };
 $<HTMLInputElement>('#char-file').onchange = async (e) => {
   const input = e.currentTarget as HTMLInputElement;
-  if (!input.files?.length || busy) return;
-  input.disabled = busy = true;
-  try { await importPack(input.files); } finally { input.disabled = busy = false; input.value = ''; }
+  if (input.files?.length) await locked(() => importPack(input.files!));
+  input.value = '';
 };
-$('#char-default').onclick = () => sendPayload({ type: 'character', pack: null, name: '말랑이' });
+$('#char-default').onclick = () => locked(() => sendPayload({ type: 'character', pack: null, name: '말랑이' }));
