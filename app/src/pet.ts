@@ -1,5 +1,5 @@
-import { emit, listen } from '@tauri-apps/api/event';
-import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition, Window } from '@tauri-apps/api/window';
+import { emit, emitTo, listen } from '@tauri-apps/api/event';
+import { currentMonitor, cursorPosition, getCurrentWindow, LogicalSize, monitorFromPoint, PhysicalPosition, Window, type Monitor } from '@tauri-apps/api/window';
 import { loadPack, type Who } from './pack';
 import type { PetEvent } from './tauri';
 
@@ -68,33 +68,42 @@ animate();
 // SMALL leaves 50px above the 100px character for emoji bubbles; keep it in sync with tauri.conf.json.
 const SMALL = { w: 120, h: 150 };
 const BIG = { w: 220, h: 220 };
-const monitor = await currentMonitor();
-const area = monitor!.workArea;
-const scale = monitor!.scaleFactor;
-const bottom = area.position.y + area.size.height;
-// The line the pet walks on (window bottom edge). Dragging moves it; it starts on the taskbar edge.
-let floor = bottom;
-// Highest floor that still leaves room for the grown window, so a bubble is never cut off at the top.
-const topFloor = () => area.position.y + BIG.h * scale;
+// The work area the pet walks on. Dropping it on another monitor switches to that monitor's floor.
+type Area = { x: number; y: number; w: number; h: number; scale: number };
+const toArea = (m: Monitor): Area => ({
+  x: m.workArea.position.x, y: m.workArea.position.y, w: m.workArea.size.width, h: m.workArea.size.height, scale: m.scaleFactor,
+});
+let area = toArea((await currentMonitor())!);
 let size = SMALL;
-// The two windows can't see each other's position, so each walks its own half and they never overlap.
-const mid = area.position.x + area.size.width / 2;
-const gap = 20 * scale;
 // x is the character's center, so resizing the window around it doesn't move the character.
-const half = () => (size.w * scale) / 2;
-const minX = () => (who === 'me' ? area.position.x : mid + gap) + half();
-const maxX = () => (who === 'me' ? mid - gap : area.position.x + area.size.width) - half();
-let x = maxX() - 40 * scale;
+const half = () => (size.w * area.scale) / 2;
+const minX = () => area.x + half();
+const maxX = () => area.x + area.w - half();
+// Start apart: mine left of center, the partner's near the right edge.
+let x = who === 'me' ? area.x + area.w / 2 - 80 * area.scale : maxX() - 40 * area.scale;
 let dir = -1;
-const place = () => win.setPosition(new PhysicalPosition(Math.round(x - half()), Math.round(floor - size.h * scale)));
+// While dragging, the pointer owns the window position.
+let drag: { sx: number; sy: number; moved: boolean; off: { x: number; y: number } | null } | null = null;
+const place = async () => {
+  if (drag?.moved) return;
+  await win.setPosition(new PhysicalPosition(Math.round(x - half()), Math.round(area.y + area.h - size.h * area.scale)));
+};
 async function resize(next: typeof SMALL) {
   if (next === size) return;
   size = next;
-  // Keep a grown window inside its half so the bubble isn't cut and the pets don't overlap.
+  // Keep a grown window inside the work area so the bubble isn't cut off at the edge.
   x = Math.min(Math.max(x, minX()), maxX());
   await win.setSize(new LogicalSize(size.w, size.h));
   await place();
 }
+
+// The pets can be anywhere on the same floor, so each tells the other where it is and they turn back before touching.
+const otherPet = who === 'me' ? 'pet' : 'pet-me';
+const floorKey = () => `${area.x},${area.y}`;
+type PetPos = { x: number; half: number; floor: string; shown: boolean };
+let peer: (PetPos & { at: number }) | null = null;
+await listen<PetPos>('pet-pos', ({ payload }) => { peer = payload.shown ? { ...payload, at: Date.now() } : null; });
+let ticks = 0;
 let pauseUntil = 0;
 let reactPose = '';
 let reactUntil = 0;
@@ -102,6 +111,7 @@ let statusPose = '';
 let statusUntil = 0;
 
 setInterval(() => {
+  if (++ticks % 5 === 0) emitTo(otherPet, 'pet-pos', { x, half: half(), floor: floorKey(), shown } satisfies PetPos).catch(() => {});
   if (!shown) return; // hidden partner window: x stays frozen with it, so show() does not jump
   const now = Date.now();
   const walking = now > pauseUntil && now > reactUntil && now > statusUntil;
@@ -111,7 +121,9 @@ setInterval(() => {
   if (!walking) return;
   if (Math.random() < 0.005) { pauseUntil = now + 2000 + Math.random() * 6000; return; }
   if (Math.random() < 0.003) dir = -dir;
-  x += dir * manifest.speed * scale;
+  const p = peer && Date.now() - peer.at < 1000 && peer.floor === floorKey() ? peer : null;
+  if (p && Math.abs(p.x - x) < p.half + half() + 20 * area.scale && Math.sign(p.x - x) === dir) dir = -dir;
+  x += dir * manifest.speed * area.scale;
   const min = minX(), max = maxX();
   if (x <= min || x >= max) { dir = -dir; x = Math.min(Math.max(x, min), max); }
   pet.classList.toggle('left', dir < 0);
@@ -193,36 +205,48 @@ await listen<PetEvent>('pet', async ({ payload: e }) => {
 });
 await emit('pet-hello');
 
-// Drag the window by hand rather than with startDragging(): the walk loop needs the drop point as its new x/floor,
-// and a short press must still open the chat. Pointer capture keeps events coming when the cursor outruns the window.
+// Drag the window by hand rather than with startDragging(): the drop point decides which monitor's floor the pet walks
+// on next, and a short press must still open the chat. Global cursor coordinates keep this right across monitors
+// with different scale factors; pointer capture keeps events coming when the cursor outruns the window.
 const DRAG_PX = 4;
-let drag: { sx: number; sy: number; x: number; floor: number; moved: boolean } | null = null;
 let dragged = false;
-let placing = false;
-pet.onpointerdown = (e) => {
+let following = false;
+pet.onpointerdown = async (e) => {
   if (e.button !== 0) return;
   pet.setPointerCapture(e.pointerId);
-  drag = { sx: e.screenX, sy: e.screenY, x, floor, moved: false };
+  const d: NonNullable<typeof drag> = { sx: e.screenX, sy: e.screenY, moved: false, off: null };
+  drag = d;
+  const [c, w] = await Promise.all([cursorPosition(), win.outerPosition()]);
+  d.off = { x: c.x - w.x, y: c.y - w.y };
 };
 pet.onpointermove = (e) => {
   if (!drag) return;
-  const dx = e.screenX - drag.sx, dy = e.screenY - drag.sy;
-  if (!drag.moved && Math.hypot(dx, dy) < DRAG_PX) return;
+  if (!drag.moved && Math.hypot(e.screenX - drag.sx, e.screenY - drag.sy) < DRAG_PX) return;
   drag.moved = true;
   pet.classList.add('dragging');
   pauseUntil = Infinity;
-  // screenX/Y are logical pixels; the window works in physical ones. Stay in this pet's half (see minX/maxX).
-  x = Math.min(Math.max(drag.x + dx * scale, minX()), maxX());
-  floor = Math.min(Math.max(drag.floor + dy * scale, topFloor()), bottom);
-  if (!placing) { placing = true; requestAnimationFrame(() => { placing = false; place(); }); }
+  if (following || !drag.off) return;
+  following = true;
+  requestAnimationFrame(async () => {
+    const c = await cursorPosition();
+    if (drag?.off) await win.setPosition(new PhysicalPosition(c.x - drag.off.x, c.y - drag.off.y));
+    following = false;
+  });
 };
-pet.onpointerup = pet.onpointercancel = () => {
+pet.onpointerup = pet.onpointercancel = async () => {
   if (!drag) return;
-  dragged = drag.moved;
+  dragged = drag.moved; // read by the click that follows this pointerup
   drag = null;
   pet.classList.remove('dragging');
-  // Stand still for a moment where it was dropped before walking on from there.
-  if (dragged) pauseUntil = Date.now() + 1500;
+  if (!dragged) return;
+  // Land on the floor of whichever monitor it was dropped on, and stand there a moment before walking on.
+  const c = await cursorPosition();
+  const m = (await monitorFromPoint(c.x, c.y)) ?? (await currentMonitor());
+  if (m) area = toArea(m);
+  const w = await win.outerPosition();
+  x = Math.min(Math.max(w.x + half(), minX()), maxX());
+  pauseUntil = Date.now() + 1500;
+  await place();
 };
 
 pet.onclick = async () => {
