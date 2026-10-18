@@ -154,6 +154,12 @@ function store<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReques
 export const savePack = (who: Who, p: StoredPack | null) => store<void>('readwrite', (s) => (p ? s.put(p, who) : s.delete(who)));
 export const storedPack = (who: Who) => store<StoredPack | undefined>('readonly', (s) => s.get(who));
 
+// My imported packs, kept by manifest id so they can be picked again without the files.
+const LIB = 'lib:';
+export const keepPack = (p: StoredPack) => store<void>('readwrite', (s) => s.put(p, LIB + p.manifest.id));
+export const dropPack = (id: string) => store<void>('readwrite', (s) => s.delete(LIB + id));
+export const keptPacks = () => store<StoredPack[]>('readonly', (s) => s.getAll(IDBKeyRange.bound(LIB, LIB + '￿')));
+
 const dataUrl = (bytes: Uint8Array, name: string) => new Promise<string>((ok) => {
   const r = new FileReader();
   r.onload = () => ok(r.result as string);
