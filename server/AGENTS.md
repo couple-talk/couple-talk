@@ -9,3 +9,7 @@
 
 - 크기가 커질 수 있는 소켓별 상태(예: 미완성 업로드 `ws.upload`)는 같은 소켓의 다음 메시지와 `close`만으로 정리하지 않는다. 멈춘 클라이언트도 pong으로 살아 있으므로 heartbeat 루프에서도 오래된 것을 버린다.
 - 이런 상한과 시간은 환경변수로 받고 기본값은 운영 값으로 둔다. 테스트는 작은 값으로 서버를 띄워 1초 안에 끝낸다 (`test.js`의 `UPLOADS_MAX`, `UPLOAD_IDLE_MS`, `HEARTBEAT_MS`).
+
+## HTTP 핸들러
+
+- `node:http` 핸들러 안에서 동기로 던진 예외는 잡히지 않고 프로세스를 죽인다. WebSocket까지 함께 끊기므로, 핸들러 안의 DB 호출은 try로 감싸고 503으로 답한다 (`/healthz`, `/metrics`).
