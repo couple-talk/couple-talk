@@ -1,4 +1,4 @@
-// Spawns the relay on a temp db and checks auth, broadcast, history and local-mode ack.
+// Spawns the relay on a temp db and checks auth, broadcast, history, local-mode ack and signal relay.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -28,6 +28,8 @@ function client(auth) {
   const queue = [], waiters = [];
   ws.on('message', (d) => { const m = JSON.parse(d); waiters.length ? waiters.shift()(m) : queue.push(m); });
   ws.next = () => queue.length ? Promise.resolve(queue.shift()) : new Promise((r) => waiters.push(r));
+  // Waits a moment and takes a queued message if one came, without leaving a waiter behind.
+  ws.quiet = async () => { await new Promise((r) => setTimeout(r, 150)); return queue.length ? queue.shift() : 'quiet'; };
   ws.put = (m) => ws.send(JSON.stringify(m));
   return new Promise((r) => ws.on('open', () => { ws.put({ op: 'auth', v: 1, ...auth }); r(ws); }));
 }
@@ -133,6 +135,34 @@ try {
   for (let i = 0; i < 61; i++) replies.push(await spam.next());
   assert.equal(replies.at(-1).error, 'rate limited');
   spam.close();
+
+  // signals: relayed to the rest of the room only, never stored, with their own budget
+  const sroom = { roomId: id(), token: id() };
+  const ga = await client({ ...sroom, device: id() });
+  await ga.next();
+  const gb = await client({ ...sroom, device: id() });
+  await gb.next();
+  const outsider = await client({ roomId: id(), token: id(), device: id() });
+  await outsider.next();
+  ga.put({ op: 'signal', blob: 'SIG1' });
+  assert.deepEqual(await gb.next(), { op: 'signal', blob: 'SIG1' });
+  assert.equal(await ga.quiet(), 'quiet', 'sender does not get its own signal');
+  assert.equal(await outsider.quiet(), 'quiet', 'signals are room-scoped');
+  const gc = await client({ ...sroom, device: id() });
+  assert.deepEqual((await gc.next()).items, [], 'signals are not stored');
+  ga.put({ op: 'signal', blob: 'X'.repeat(4 * 1024 + 1) });
+  assert.equal((await ga.next()).error, 'bad request', 'signals stay small');
+  ga.put({ op: 'signal', blob: 42 });
+  assert.equal((await ga.next()).error, 'bad request');
+  for (let i = 0; i < 121; i++) ga.put({ op: 'signal', blob: `S${i}` });
+  const relayed = [];
+  for (let m; (m = await gb.quiet()) !== 'quiet';) relayed.push(m.blob);
+  // 120 a minute, and SIG1 above already used one
+  assert.equal(relayed.length, 119, 'over-budget signals are dropped');
+  assert.equal(await ga.quiet(), 'quiet', 'dropping a signal sends no error');
+  ga.put({ op: 'send', blob: 'AFTER', receipt: receiptOf(id()) });
+  assert.equal((await ga.next()).blob, 'AFTER', 'signals do not use up the message budget');
+  for (const ws of [ga, gb, gc, outsider]) ws.close();
 
   // health on the public port, metrics only on the internal one
   assert.equal(await (await fetch(`http://localhost:${PORT}/healthz`)).text(), 'ok');

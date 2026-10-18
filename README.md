@@ -82,7 +82,7 @@ npm run tauri build    # 설치 파일 생성 (Windows 빌드는 Windows에서)
 ## 테스트
 
 ```sh
-cd server && npm test      # 인증, 브로드캐스트, 히스토리, 로컬 모드 삭제
+cd server && npm test      # 인증, 브로드캐스트, 히스토리, 로컬 모드 삭제, 신호 중계
 cd app && npm run check    # 암복호화 왕복, 다른 키/틀린 비밀번호/키체인 키 없이 거부
 cd app/src-tauri && cargo test --lib -- --ignored   # 실제 OS 키체인 저장/재사용 (테스트 전용 항목 사용 후 삭제)
 ```

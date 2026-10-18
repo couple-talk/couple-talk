@@ -17,6 +17,9 @@ const BLOB_MAX = 64 * 1024;
 const PACK_MAX = 8 * 1024 * 1024;
 const PACK_PART = 192 * 1024;
 const PACKS_PER_ROOM = 4;
+// Signals (presence heartbeats, read marks) are relayed live and never stored, so they get their own small cap and budget.
+const SIGNAL_MAX = 4 * 1024;
+const SIGNALS_PER_MIN = 120;
 // A client that requests packs but never reads its socket would otherwise grow our send buffer without bound.
 const SEND_BUFFER_MAX = 16 * 1024 * 1024;
 // Unfinished uploads are held in memory, so they are capped across all sockets and dropped when they stall.
@@ -89,10 +92,12 @@ function auth(ws, m) {
   ws.send(JSON.stringify({ op: 'ready', v: 1, mode: room.mode, items, packs: 2 }));
 }
 
-function limited(ws) {
+/** Per-socket, per-minute budget; `kind` keeps signals from eating into the message budget. */
+function limited(ws, kind = 'send', max = MSG_PER_MIN) {
   const now = Date.now();
-  if (now - (ws.windowStart ?? 0) > 60_000) Object.assign(ws, { windowStart: now, sent: 0 });
-  return ++ws.sent > MSG_PER_MIN;
+  const w = (ws.windows ??= {});
+  if (now - (w[kind]?.start ?? 0) > 60_000) w[kind] = { start: now, n: 0 };
+  return ++w[kind].n > max;
 }
 
 function handle(ws, m) {
@@ -132,6 +137,13 @@ function handle(ws, m) {
     if (ws.bufferedAmount > SEND_BUFFER_MAX) return 'busy';
     const row = q.getPack.get(ws.roomId, m.hash);
     ws.send(JSON.stringify({ op: 'pack', hash: m.hash, blob: row?.blob ?? null }));
+  } else if (m.op === 'signal') {
+    // Sealed like a message, so the relay can't tell a heartbeat from a read mark. Only peers online right now get it.
+    if (typeof m.blob !== 'string' || m.blob.length > SIGNAL_MAX) return 'bad request';
+    // Dropped silently: an error reply would also fail the client's pending pack put/get.
+    if (limited(ws, 'signal', SIGNALS_PER_MIN)) return;
+    const out = JSON.stringify({ op: 'signal', blob: m.blob });
+    for (const peer of rooms.get(ws.roomId)) if (peer !== ws) peer.send(out);
   } else if (m.op === 'ack') {
     if (ws.mode === 'local' && typeof m.receipt === 'string') q.ack.run(ws.roomId, Number(m.id) || 0, ws.device, sha256b64(m.receipt));
   } else return 'unknown op';
