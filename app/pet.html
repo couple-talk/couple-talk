@@ -18,6 +18,9 @@
         font: 13px/1.4 system-ui, sans-serif; color: #222; word-break: keep-all; overflow-wrap: anywhere; }
       #bubble.say::after { content: ''; position: absolute; left: 50%; top: 100%; translate: -50% 0;
         border: 6px solid transparent; border-top-color: #fff; }
+      #tag { position: absolute; left: 50%; bottom: 1px; translate: -50% 0; max-width: 110px; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap; font: 600 11px system-ui, sans-serif; color: #2b2124; background: #fffd; border-radius: 8px; padding: 0 6px; }
+      #tag:empty { display: none; }
       .jump #body { animation: jump .35s ease-out 3 !important; }
       .shake #body { animation: shake .1s linear 8 !important; }
       .squish #body { animation: squish .5s ease-in-out 3 !important; }
@@ -37,6 +40,7 @@
       <img id="body" alt="" draggable="false" />
       <span id="status"></span>
       <span id="bubble"></span>
+      <span id="tag"></span>
     </div>
   </body>
 </html>

@@ -8,6 +8,8 @@ export const REQUIRED_POSES = [
 ] as const;
 export const PACK_MAX_BYTES = 4 * 1024 * 1024;
 const MAX_SIDE = 1024;
+const MAX_POSES = 32;
+const MAX_FRAMES = 8;
 const FILE_RE = /^[\w-][\w.-]{0,63}\.(png|svg)$/;
 
 export type Manifest = {
@@ -16,15 +18,27 @@ export type Manifest = {
 export type Files = Record<string, Uint8Array>;
 export type Report = { errors: string[]; warnings: string[]; manifest?: Manifest };
 
-const inflate = async (data: Uint8Array) =>
-  new Uint8Array(await new Response(new Blob([data as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());
+// Stops at `max` bytes: a tiny IDAT can otherwise inflate to gigabytes (decompression bomb).
+async function inflate(parts: Uint8Array[], max: number) {
+  const reader = new Blob(parts as BlobPart[]).stream().pipeThrough(new DecompressionStream('deflate')).getReader();
+  const out = new Uint8Array(max);
+  for (let n = 0; ; ) {
+    const { done, value } = await reader.read().catch(() => { throw new Error('PNG 압축 데이터가 잘못됐어요'); });
+    if (done) return out.subarray(0, n);
+    if (n + value.length > max) { await reader.cancel(); throw new Error('PNG 데이터가 이미지 크기보다 커요'); }
+    out.set(value, n);
+    n += value.length;
+  }
+}
 
 // Only 8-bit RGBA PNGs are decoded; that is what image generators export with a transparent background.
 async function readPng(buf: Uint8Array) {
   const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  if (buf.length < 33 || v.getUint32(0) !== 0x89504e47) throw new Error('PNG 파일이 아니에요');
+  if (buf.length < 33 || v.getUint32(0) !== 0x89504e47 || String.fromCharCode(...buf.subarray(12, 16)) !== 'IHDR')
+    throw new Error('PNG 파일이 아니에요');
   const w = v.getUint32(16), h = v.getUint32(20), depth = buf[24], color = buf[25];
-  if (w > MAX_SIDE || h > MAX_SIDE) throw new Error(`${MAX_SIDE}px보다 커요 (${w}×${h})`);
+  if (!w || !h || w > MAX_SIDE || h > MAX_SIDE) throw new Error(`크기가 잘못됐거나 ${MAX_SIDE}px보다 커요 (${w}×${h})`);
+  if (buf[28] !== 0) throw new Error('인터레이스 PNG는 안 돼요. 일반 PNG로 다시 저장해 주세요');
   if (depth !== 8 || color !== 6) return { w, h };
   const idat: Uint8Array[] = [];
   for (let p = 8; p + 8 <= buf.length; ) {
@@ -32,15 +46,15 @@ async function readPng(buf: Uint8Array) {
     if (type === 'IDAT') idat.push(buf.subarray(p + 8, p + 8 + len));
     p += 12 + len;
   }
-  const raw = await inflate(new Uint8Array(await new Blob(idat as BlobPart[]).arrayBuffer()));
   const stride = w * 4, out = new Uint8Array(stride * h);
+  const raw = await inflate(idat, (stride + 1) * h);
   if (raw.length < (stride + 1) * h) throw new Error('PNG 데이터가 잘려 있어요');
   for (let y = 0; y < h; y++) {
     const f = raw[y * (stride + 1)], src = y * (stride + 1) + 1, row = y * stride;
     for (let x = 0; x < stride; x++) {
       const a = x >= 4 ? out[row + x - 4] : 0, b = y ? out[row - stride + x] : 0, c = x >= 4 && y ? out[row - stride + x - 4] : 0;
       const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
-      const pred = [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f] ?? 0;
+      const pred = f === 1 ? a : f === 2 ? b : f === 3 ? (a + b) >> 1 : f === 4 ? (pa <= pb && pa <= pc ? a : pb <= pc ? b : c) : 0;
       out[row + x] = (raw[src + x] + pred) & 0xff;
     }
   }
@@ -49,7 +63,11 @@ async function readPng(buf: Uint8Array) {
 
 const num = (n: unknown, min: number, max: number, d: number) => (n === undefined ? d : typeof n === 'number' && n >= min && n <= max ? n : NaN);
 
-export async function checkPack(files: Files): Promise<Report> {
+/**
+ * `svg` is only for the built-in pack: packs from users and partners must be PNG.
+ * `all` keeps checking after the first error, for the author's own pack; a partner's pack stops early.
+ */
+export async function checkPack(files: Files, { svg = false, all = false } = {}): Promise<Report> {
   const errors: string[] = [], warnings: string[] = [];
   let m;
   try { m = JSON.parse(new TextDecoder().decode(files['manifest.json'])); } catch { return { errors: ['manifest.json이 없거나 JSON 형식이 아니에요'], warnings }; }
@@ -66,14 +84,24 @@ export async function checkPack(files: Files): Promise<Report> {
   const poses = m?.poses;
   if (!poses || typeof poses !== 'object' || Object.values(poses).some((f) => !Array.isArray(f) || f.some((x) => typeof x !== 'string')))
     return { errors: [...errors, 'poses는 포즈 이름 → 파일 이름 목록이어야 해요'], warnings };
+  if (Object.keys(poses).length > MAX_POSES) return { errors: [...errors, `포즈는 ${MAX_POSES}개까지예요`], warnings };
+  if (Object.values(poses as Record<string, string[]>).some((f) => f.length > MAX_FRAMES))
+    return { errors: [...errors, `한 포즈의 프레임은 ${MAX_FRAMES}장까지예요`], warnings };
   for (const p of REQUIRED_POSES) if (!poses[p]?.length) errors.push(`필수 포즈 없음: ${p}`);
   if ((poses.walk?.length ?? 0) < 2) errors.push('walk는 프레임이 2장 이상이어야 해요');
 
-  let size = 0;
+  // Each file is decoded once even if many frames reuse it.
+  const used = new Set<string>();
   for (const [pose, frames] of Object.entries(poses as Record<string, string[]>)) for (const file of frames) {
-    const where = `${pose}/${file}`;
-    if (!FILE_RE.test(file)) { errors.push(`${where}: 파일 이름은 영문·숫자·-_. 이고 .png나 .svg로 끝나야 해요`); continue; }
-    if (!files[file]) { errors.push(`${where}: 파일이 없어요`); continue; }
+    if (!FILE_RE.test(file)) errors.push(`${pose}/${file}: 파일 이름은 영문·숫자·-_. 이고 .png나 .svg로 끝나야 해요`);
+    else if (!files[file]) errors.push(`${pose}/${file}: 파일이 없어요`);
+    else if (file.endsWith('.svg') && !svg) errors.push(`${pose}/${file}: 가져오는 팩은 PNG만 쓸 수 있어요`);
+    else used.add(file);
+  }
+  let size = 0;
+  for (const file of used) {
+    if (errors.length && !all) break; // a hostile pack must not cost a full decode of every file
+    const where = file;
     if (file.endsWith('.svg')) continue;
     let img: Awaited<ReturnType<typeof readPng>>;
     try { img = await readPng(files[file]); } catch (e) { errors.push(`${where}: ${(e as Error).message}`); continue; }
@@ -114,7 +142,10 @@ function store<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReques
     req.onupgradeneeded = () => req.result.createObjectStore('packs');
     req.onerror = () => fail(req.error);
     req.onsuccess = () => {
-      const r = fn(req.result.transaction('packs', mode).objectStore('packs'));
+      // Close right away (the transaction still completes): an open connection in a pet window blocks deleteDatabase on reset.
+      const db = req.result;
+      const r = fn(db.transaction('packs', mode).objectStore('packs'));
+      db.close();
       r.onsuccess = () => ok(r.result);
       r.onerror = () => fail(r.error);
     };
@@ -138,10 +169,10 @@ export async function toStored(hash: string, manifest: Manifest, files: Files): 
 export const BUILTIN = 'default';
 
 /** What a pet window draws: the stored pack for `who`, or the built-in character. */
-export async function loadPack(who: Who): Promise<{ manifest: Manifest; url: (file: string) => string }> {
+export async function loadPack(who: Who): Promise<{ manifest: Manifest; url: (file: string) => string; builtin: boolean }> {
   const p = await storedPack(who).catch(() => undefined);
-  if (p) return { manifest: p.manifest, url: (f) => p.files[f] };
+  if (p) return { manifest: p.manifest, url: (f) => p.files[f], builtin: false };
   const base = `/characters/${BUILTIN}/`;
   const manifest: Manifest = await (await fetch(base + 'manifest.json')).json();
-  return { manifest, url: (f) => base + f };
+  return { manifest, url: (f) => base + f, builtin: true };
 }

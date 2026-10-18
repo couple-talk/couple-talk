@@ -45,6 +45,7 @@ async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: stri
   const pepper = await loadDeviceKey(true);
   config = { server, wrapped: await wrapSecret(secret, pin, pepper), peppered: !!pepper, nick: nick.trim(), mode, device: randomId() };
   save('ct.config', config);
+  petEmit({ type: 'reload' }); // the pet shows my nickname
   await start(secret);
 }
 
@@ -92,12 +93,15 @@ bindForm('#unlock-form', async (f) => {
 });
 
 // Native confirm()/alert() aren't reliable in Tauri webviews, so confirm by clicking twice.
-$('#reset').onclick = (e) => {
+$('#reset').onclick = async (e) => {
   const b = e.currentTarget as HTMLButtonElement;
   if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = '정말 지울까요? 한 번 더 누르세요'; return; }
   localStorage.removeItem('ct.config');
   localStorage.removeItem('ct.history');
-  indexedDB.deleteDatabase('ct-packs');
+  localStorage.removeItem('ct.partner');
+  await new Promise((done) => { const r = indexedDB.deleteDatabase('ct-packs'); r.onsuccess = r.onerror = r.onblocked = done; });
+  // Awaited so the pets drop the old name tags and characters before this page navigates away.
+  await petEmit({ type: 'reload' }).catch(() => {});
   location.reload();
 };
 
@@ -131,7 +135,7 @@ async function start(secret: Bytes) {
     },
     onReady: async (mode, items) => {
       for (const it of items) await receive(it, false, mode);
-      for (const who of ['me', 'partner'] as const) if (wanted[who] !== undefined) applyCharacter(who, wanted[who]!);
+      for (const who of ['me', 'partner'] as const) { const w = wanted[who]; if (w) applyCharacter(who, w.pack, w.id); }
     },
     onMsg: (it) => receive(it, true, config!.mode),
   });
@@ -155,7 +159,8 @@ function isValid(p: unknown): p is Payload {
   if ((o.n !== undefined && typeof o.n !== 'string') || (o.at !== undefined && typeof o.at !== 'number')) return false;
   if (o.type === 'chat') return typeof o.text === 'string';
   if (o.type === 'status') return typeof o.emoji === 'string' && typeof o.text === 'string';
-  if (o.type === 'character') return (o.pack === null || (typeof o.pack === 'string' && /^[\w-]{43}$/.test(o.pack))) && typeof o.name === 'string';
+  if (o.type === 'character')
+    return (o.pack === null || (typeof o.pack === 'string' && /^[\w-]{43}$/.test(o.pack))) && typeof o.name === 'string' && o.name.length <= 20;
   return o.type === 'action' && typeof o.kind === 'string' && Object.hasOwn(ACTIONS, o.kind);
 }
 
@@ -173,6 +178,8 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
     seenNonces.add(p.n);
   }
   const mine = p.from === config!.nick;
+  // The partner's pet appears (with this name) once we've heard from them.
+  if (!mine && load<string | null>('ct.partner', null) !== p.from) { save('ct.partner', p.from); petEmit({ type: 'reload' }); }
   const time = new Date(p.at ?? it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const row = document.createElement('div');
 
@@ -188,7 +195,12 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
       : p.type === 'character'
         ? `${p.from}님이 캐릭터를 바꿨어요: ${p.name}`
         : `${p.from}님이 ${ACTIONS[p.kind].join(' ')}`;
-    if (p.type === 'character') applyCharacter(mine ? 'me' : 'partner', p.pack);
+    // Replayed history only records the latest choice; it is applied once the replay is done (onReady).
+    if (p.type === 'character') {
+      const who = mine ? 'me' : 'partner';
+      if (live) applyCharacter(who, p.pack, it.id);
+      else if ((wanted[who]?.id ?? -1) < it.id) wanted[who] = { id: it.id, pack: p.pack };
+    }
     if (p.type === 'status') {
       statuses[mine ? 'me' : 'partner'] = p.emoji;
       if (!mine) $('#partner').textContent = `${p.from} ${p.emoji} ${p.text}`;
@@ -210,12 +222,14 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
 
 // History replays every character change in order; only the newest one per side may land.
 const charSeq: Record<Who, number> = { me: 0, partner: 0 };
-// Retried on reconnect so one failed download doesn't stick until the partner changes again.
-const wanted: Partial<Record<Who, string | null>> = {};
+// Applied after each history replay, which also retries a failed download on reconnect.
+// Keyed by message id so a replayed older change can't override a live newer one.
+const wanted: Partial<Record<Who, { id: number; pack: string | null }>> = {};
 
-async function applyCharacter(who: Who, hash: string | null) {
+async function applyCharacter(who: Who, hash: string | null, id: number) {
+  if ((wanted[who]?.id ?? -1) > id) return;
   const seq = ++charSeq[who];
-  wanted[who] = hash;
+  wanted[who] = { id, pack: hash };
   const label = $(who === 'me' ? '#char-me' : '#char-partner');
   try {
     if (!hash) await savePack(who, null);
@@ -230,8 +244,9 @@ async function applyCharacter(who: Who, hash: string | null) {
       const files: Files = Object.fromEntries(Object.entries(sealed.files).map(([k, v]) => [k, unb64(v)]));
       const report = await checkPack(files);
       if (!report.manifest) throw new Error(report.errors[0]);
+      const stored = await toStored(hash, report.manifest, files);
       if (seq !== charSeq[who]) return;
-      await savePack(who, await toStored(hash, report.manifest, files));
+      await savePack(who, stored);
     }
     if (seq !== charSeq[who]) return;
     petEmit({ type: 'reload' });
@@ -252,21 +267,26 @@ async function importPack(list: FileList) {
   const note = (text: string, cls = '') => report.append(Object.assign(document.createElement('li'), { textContent: text, className: cls }));
   const files: Files = {};
   for (const f of list) files[f.name] = new Uint8Array(await f.arrayBuffer());
-  const r = await checkPack(files);
+  const r = await checkPack(files, { all: true }); // my own files: show every problem at once
   for (const e of r.errors) note(`❌ ${e}`, 'error');
   for (const w of r.warnings) note(`⚠️ ${w}`);
   if (!r.manifest) return;
   note('검사 통과. 암호화해서 보내는 중…');
+  // Older relays reject part uploads without a hash in the error, which would only surface as a timeout.
+  const v = net.packs();
+  if (v !== 2) {
+    note(v === null ? '연결 중이에요. 잠시 후 다시 시도해 주세요.' : '이 서버는 캐릭터 팩 전송을 지원하지 않아요. 서버를 업데이트해 주세요.', 'error');
+    return;
+  }
   const used = ['manifest.json', ...new Set(Object.values(r.manifest.poses).flat())];
   const blob = await seal(room.key, { files: Object.fromEntries(used.map((f) => [f, b64(files[f])])) });
   const hash = await receiptOf(blob);
-  try { await net.putPack(hash, blob); } catch (e) {
-    const msg = (e as Error).message;
-    note(msg === 'unknown op' ? '이 서버는 캐릭터 팩 전송을 지원하지 않아요. 서버를 업데이트해 주세요.' : `보내지 못했어요 (${msg})`, 'error');
-    return;
-  }
+  try { await net.putPack(hash, blob); } catch (e) { note(`보내지 못했어요 (${(e as Error).message})`, 'error'); return; }
+  // Saved before announcing so my own echo doesn't download the pack again; undone if the announcement fails.
+  const prev = await storedPack('me');
   await savePack('me', await toStored(hash, r.manifest, files));
   if (await sendPayload({ type: 'character', pack: hash, name: r.manifest.name })) note(`✅ ${r.manifest.name}(으)로 바꿨어요. 상대 화면에도 보여요.`);
+  else { await savePack('me', prev ?? null); note('연결이 끊겨서 바꾸지 못했어요. 다시 시도해 주세요.', 'error'); }
 }
 
 async function sendPayload(p: Record<string, unknown>) {

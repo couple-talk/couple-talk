@@ -27,9 +27,22 @@ const bubble = document.getElementById('bubble')!;
 const win = getCurrentWindow();
 const who: Who = win.label === 'pet-me' ? 'me' : 'partner';
 
-let { manifest, url } = await loadPack(who);
+let { manifest, url, builtin } = await loadPack(who);
 const preload = () => { for (const f of Object.values(manifest.poses).flat()) new Image().src = url(f); };
 preload();
+
+// Both sides start as the built-in character, so the partner's copy is tinted and each pet wears a name tag.
+// The partner's window stays hidden until we know there is a partner (their first message).
+const stored = (k: string) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null'); } catch { return null; } };
+let shown = true; // windows start visible (tauri.conf.json)
+async function showIdentity() {
+  const name: string | null = who === 'me' ? stored('ct.config')?.nick ?? null : stored('ct.partner');
+  document.getElementById('tag')!.textContent = name ?? (who === 'me' ? '나' : '');
+  body.style.filter = who === 'partner' && builtin ? 'hue-rotate(190deg)' : '';
+  // show() can take focus on macOS, so only toggle on an actual change.
+  if (who === 'partner' && shown !== !!name) { shown = !!name; await (shown ? win.show() : win.hide()); }
+}
+await showIdentity();
 
 let pose = '';
 let frame = 0;
@@ -39,11 +52,16 @@ function draw() {
   const src = url(f[frame % f.length]);
   if (body.getAttribute('src') !== src) body.src = src;
 }
-setInterval(() => {
-  // idle's second frame is a blink, so flash it now and then instead of cycling.
-  frame = pose === 'idle' ? +(Math.random() < 0.06) : frame + 1;
-  draw();
-}, 1000 / manifest.fps);
+let frameTimer = 0;
+const animate = () => {
+  clearInterval(frameTimer);
+  frameTimer = window.setInterval(() => {
+    // idle's second frame is a blink, so flash it now and then instead of cycling.
+    frame = pose === 'idle' ? +(Math.random() < 0.06) : frame + 1;
+    draw();
+  }, 1000 / manifest.fps);
+};
+animate();
 
 // Walk the window itself along the bottom of the work area, so no click-through handling is needed.
 // The window stays small and only grows while a speech bubble or hearts are up, so it rarely blocks clicks.
@@ -55,16 +73,21 @@ const area = monitor!.workArea;
 const scale = monitor!.scaleFactor;
 const bottom = area.position.y + area.size.height;
 let size = SMALL;
+// The two windows can't see each other's position, so each walks its own half and they never overlap.
+const mid = area.position.x + area.size.width / 2;
+const gap = 20 * scale;
 // x is the character's center, so resizing the window around it doesn't move the character.
-let x = area.position.x + area.size.width - (60 + (who === 'me' ? 200 : 40)) * scale;
-let dir = -1;
 const half = () => (size.w * scale) / 2;
+const minX = () => (who === 'me' ? area.position.x : mid + gap) + half();
+const maxX = () => (who === 'me' ? mid - gap : area.position.x + area.size.width) - half();
+let x = maxX() - 40 * scale;
+let dir = -1;
 const place = () => win.setPosition(new PhysicalPosition(Math.round(x - half()), Math.round(bottom - size.h * scale)));
 async function resize(next: typeof SMALL) {
   if (next === size) return;
   size = next;
-  // Keep a grown window on screen so the bubble isn't cut at the edges.
-  x = Math.min(Math.max(x, area.position.x + half()), area.position.x + area.size.width - half());
+  // Keep a grown window inside its half so the bubble isn't cut and the pets don't overlap.
+  x = Math.min(Math.max(x, minX()), maxX());
   await win.setSize(new LogicalSize(size.w, size.h));
   await place();
 }
@@ -75,6 +98,7 @@ let statusPose = '';
 let statusUntil = 0;
 
 setInterval(() => {
+  if (!shown) return; // hidden partner window: x stays frozen with it, so show() does not jump
   const now = Date.now();
   const walking = now > pauseUntil && now > reactUntil && now > statusUntil;
   const next = now < reactUntil ? reactPose : now < statusUntil ? statusPose : walking ? 'walk' : 'idle';
@@ -84,7 +108,7 @@ setInterval(() => {
   if (Math.random() < 0.005) { pauseUntil = now + 2000 + Math.random() * 6000; return; }
   if (Math.random() < 0.003) dir = -dir;
   x += dir * manifest.speed * scale;
-  const min = area.position.x + half(), max = area.position.x + area.size.width - half();
+  const min = minX(), max = maxX();
   if (x <= min || x >= max) { dir = -dir; x = Math.min(Math.max(x, min), max); }
   pet.classList.toggle('left', dir < 0);
   place();
@@ -143,9 +167,11 @@ function react(r: Reaction, say?: string) {
 
 await listen<PetEvent>('pet', async ({ payload: e }) => {
   if (e.type === 'reload') {
-    ({ manifest, url } = await loadPack(who));
+    ({ manifest, url, builtin } = await loadPack(who));
     preload();
+    animate();
     draw();
+    await showIdentity();
     return;
   }
   if (e.from !== who && e.type !== 'action') return;
