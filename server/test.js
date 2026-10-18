@@ -9,12 +9,14 @@ import { createHash, randomBytes } from 'node:crypto';
 import WebSocket from 'ws';
 
 const PORT = 18080;
+const METRICS_PORT = 18081;
 const DB_PATH = join(mkdtempSync(join(tmpdir(), 'ct-')), 'test.db');
 // start from the pre-receipt schema to cover the migration
 new DatabaseSync(DB_PATH).exec(`CREATE TABLE messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, sender TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL)`);
 const srv = spawn('node', ['server.js'], {
-  env: { ...process.env, PORT, DB_PATH },
+  // Small upload budget and fast heartbeat so the stalled-upload case runs in under a second.
+  env: { ...process.env, PORT, METRICS_PORT, DB_PATH, UPLOADS_MAX: 550 * 1024, UPLOAD_IDLE_MS: 300, HEARTBEAT_MS: 100 },
   stdio: 'inherit',
 });
 await new Promise((r) => setTimeout(r, 500));
@@ -36,7 +38,9 @@ try {
   // server mode: history + broadcast
   const room = { roomId: id(), token: id() };
   const a = await client({ ...room, device: id() });
-  assert.deepEqual((await a.next()).items, []);
+  const ready = await a.next();
+  assert.deepEqual(ready.items, []);
+  assert.equal(ready.packs, 2, 'ready advertises the pack upload protocol');
   const b = await client({ ...room, device: id() });
   await b.next();
   a.put({ op: 'send', blob: 'CIPHER1', receipt: receiptOf(id()) });
@@ -74,45 +78,54 @@ try {
   // oversized frame must not take the relay down
   const big = new WebSocket(`ws://localhost:${PORT}`);
   await new Promise((r) => big.on('open', r));
-  big.send('x'.repeat(9 * 1024 * 1024));
+  big.send('x'.repeat(300 * 1024));
   await new Promise((r) => big.on('close', r));
   const alive = await client({ roomId: id(), token: id(), device: id() });
   assert.equal((await alive.next()).op, 'ready');
   alive.close();
 
-  // character packs: content-addressed, room-scoped, deleted after the partner fetches in local mode
+  // character packs: uploaded in ordered parts, content-addressed, room-scoped
   const sha = (s) => createHash('sha256').update(s).digest('base64url');
+  const PART = 192 * 1024;
+  const upload = (ws, hash, blob, parts = Math.ceil(blob.length / PART)) => {
+    for (let i = 0; i < parts; i++) ws.put({ op: 'put', hash, part: i, parts, data: blob.slice(i * PART, (i + 1) * PART) });
+  };
   const pa = await client({ ...room, device: id() });
   await pa.next();
-  const pack = 'P'.repeat(200 * 1024);
-  pa.put({ op: 'put', hash: id(), blob: pack });
+  const pack = 'P'.repeat(500 * 1024);
+  upload(pa, id(), pack);
   assert.equal((await pa.next()).error, 'bad request', 'hash must match blob');
-  pa.put({ op: 'put', hash: sha(pack), blob: pack });
+  upload(pa, sha(pack), pack);
   assert.deepEqual(await pa.next(), { op: 'stored', hash: sha(pack) });
-  pa.put({ op: 'send', blob: pack, receipt: receiptOf(id()) });
+  pa.put({ op: 'put', hash: sha(pack), part: 1, parts: 3, data: 'x' });
+  assert.deepEqual(await pa.next(), { op: 'error', error: 'bad request', hash: sha(pack) }, 'parts must start at 0');
+  pa.put({ op: 'send', blob: 'Q'.repeat(100 * 1024), receipt: receiptOf(id()) });
   assert.equal((await pa.next()).error, 'bad request', 'chat blobs stay small');
   const pb = await client({ ...room, device: id() });
   await pb.next();
   pb.put({ op: 'get', hash: sha(pack) });
   assert.equal((await pb.next()).blob, pack);
+  pb.put({ op: 'get', hash: sha(pack) });
+  assert.equal((await pb.next()).blob, pack, 'fetching again still works (other PCs, failed validation)');
   const other = await client({ roomId: id(), token: id(), device: id() });
   await other.next();
   other.put({ op: 'get', hash: sha(pack) });
   assert.equal((await other.next()).blob, null, 'packs are room-scoped');
-
-  const lpa = await client({ ...lroom, device: devA });
-  await lpa.next();
-  lpa.put({ op: 'put', hash: sha('LP'), blob: 'LP' });
-  await lpa.next();
-  lpa.put({ op: 'get', hash: sha('LP') });
-  assert.equal((await lpa.next()).blob, 'LP', "sender's own fetch keeps it");
-  const lpb = await client({ ...lroom, device: devB });
-  await lpb.next();
-  lpb.put({ op: 'get', hash: sha('LP') });
-  assert.equal((await lpb.next()).blob, 'LP');
-  lpb.put({ op: 'get', hash: sha('LP') });
-  assert.equal((await lpb.next()).blob, null);
-  for (const ws of [pa, pb, other, lpa, lpb]) ws.close();
+  // a stalled upload must not hold the global upload budget
+  const sa = await client({ ...room, device: id() });
+  await sa.next();
+  const sb = await client({ ...room, device: id() });
+  await sb.next();
+  const stalled = id();
+  for (let i = 0; i < 2; i++) sa.put({ op: 'put', hash: stalled, part: i, parts: 3, data: 'A'.repeat(PART) });
+  await new Promise((r) => setTimeout(r, 100));
+  const small = 'B'.repeat(190 * 1024);
+  sb.put({ op: 'put', hash: sha(small), part: 0, parts: 1, data: small });
+  assert.equal((await sb.next()).error, 'busy');
+  await new Promise((r) => setTimeout(r, 600));
+  sb.put({ op: 'put', hash: sha(small), part: 0, parts: 1, data: small });
+  assert.deepEqual(await sb.next(), { op: 'stored', hash: sha(small) }, 'stalled upload released by heartbeat');
+  for (const ws of [pa, pb, other, sa, sb]) ws.close();
 
   // per-socket send rate limit
   const spam = await client({ roomId: id(), token: id(), device: id() });
@@ -125,31 +138,45 @@ try {
 
   // signals: relayed to the rest of the room only, never stored, with their own budget
   const sroom = { roomId: id(), token: id() };
-  const sa = await client({ ...sroom, device: id() });
-  await sa.next();
-  const sb = await client({ ...sroom, device: id() });
-  await sb.next();
+  const ga = await client({ ...sroom, device: id() });
+  await ga.next();
+  const gb = await client({ ...sroom, device: id() });
+  await gb.next();
   const outsider = await client({ roomId: id(), token: id(), device: id() });
   await outsider.next();
-  sa.put({ op: 'signal', blob: 'SIG1' });
-  assert.deepEqual(await sb.next(), { op: 'signal', blob: 'SIG1' });
-  assert.equal(await sa.quiet(), 'quiet', 'sender does not get its own signal');
+  ga.put({ op: 'signal', blob: 'SIG1' });
+  assert.deepEqual(await gb.next(), { op: 'signal', blob: 'SIG1' });
+  assert.equal(await ga.quiet(), 'quiet', 'sender does not get its own signal');
   assert.equal(await outsider.quiet(), 'quiet', 'signals are room-scoped');
-  const sc = await client({ ...sroom, device: id() });
-  assert.deepEqual((await sc.next()).items, [], 'signals are not stored');
-  sa.put({ op: 'signal', blob: 'X'.repeat(4 * 1024 + 1) });
-  assert.equal((await sa.next()).error, 'bad request', 'signals stay small');
-  sa.put({ op: 'signal', blob: 42 });
-  assert.equal((await sa.next()).error, 'bad request');
-  for (let i = 0; i < 121; i++) sa.put({ op: 'signal', blob: `S${i}` });
+  const gc = await client({ ...sroom, device: id() });
+  assert.deepEqual((await gc.next()).items, [], 'signals are not stored');
+  ga.put({ op: 'signal', blob: 'X'.repeat(4 * 1024 + 1) });
+  assert.equal((await ga.next()).error, 'bad request', 'signals stay small');
+  ga.put({ op: 'signal', blob: 42 });
+  assert.equal((await ga.next()).error, 'bad request');
+  for (let i = 0; i < 121; i++) ga.put({ op: 'signal', blob: `S${i}` });
   const relayed = [];
-  for (let m; (m = await sb.quiet()) !== 'quiet';) relayed.push(m.blob);
+  for (let m; (m = await gb.quiet()) !== 'quiet';) relayed.push(m.blob);
   // 120 a minute, and SIG1 above already used one
   assert.equal(relayed.length, 119, 'over-budget signals are dropped');
-  assert.equal(await sa.quiet(), 'quiet', 'dropping a signal sends no error');
-  sa.put({ op: 'send', blob: 'AFTER', receipt: receiptOf(id()) });
-  assert.equal((await sa.next()).blob, 'AFTER', 'signals do not use up the message budget');
-  for (const ws of [sa, sb, sc, outsider]) ws.close();
+  assert.equal(await ga.quiet(), 'quiet', 'dropping a signal sends no error');
+  ga.put({ op: 'send', blob: 'AFTER', receipt: receiptOf(id()) });
+  assert.equal((await ga.next()).blob, 'AFTER', 'signals do not use up the message budget');
+  for (const ws of [ga, gb, gc, outsider]) ws.close();
+
+  // health on the public port, metrics only on the internal one
+  assert.equal(await (await fetch(`http://localhost:${PORT}/healthz`)).text(), 'ok');
+  assert.equal((await fetch(`http://localhost:${PORT}/metrics`)).status, 404);
+  const metrics = await (await fetch(`http://localhost:${METRICS_PORT}/metrics`)).text();
+  assert.match(metrics, /^couple_talk_rooms [1-9]\d*$/m);
+  assert.match(metrics, /^couple_talk_messages_total [1-9]\d*$/m);
+  assert.match(metrics, /^couple_talk_connections \d+$/m);
+  assert.ok(!/[A-Za-z0-9_-]{43}/.test(metrics), 'no room ids in metrics');
+
+  // a DB failure must not take the relay down through a metrics scrape
+  new DatabaseSync(DB_PATH).exec('DROP TABLE rooms');
+  assert.equal((await fetch(`http://localhost:${METRICS_PORT}/metrics`)).status, 503);
+  assert.equal((await fetch(`http://localhost:${PORT}/healthz`)).status, 503, 'process still up after the failed scrape');
 
   console.log('server ok');
   for (const ws of [a, b, c, la, intruder, lb, lb2]) ws.close();

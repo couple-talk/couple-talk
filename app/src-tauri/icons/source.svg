@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Regenerate (any OS): in app/, run `npx tauri icon src-tauri/icons/source.svg`, then delete
+       src-tauri/icons/android, src-tauri/icons/ios and src-tauri/icons/64x64.png (not in bundle.icon). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff1f4"/>
+      <stop offset="1" stop-color="#ffc9d6"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity=".18"/>
+    </filter>
+  </defs>
+  <!-- macOS icon grid: 824px squircle centred on a 1024 canvas -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)" filter="url(#shadow)"/>
+
+  <!-- talk bubble with a heart -->
+  <g filter="url(#shadow)">
+    <path d="M512 196c-96 0-168 52-168 122 0 44 28 82 72 104l-18 58 70-38c14 3 29 4 44 4 96 0 168-52 168-128s-72-122-168-122z" fill="#fff"/>
+  </g>
+  <path transform="translate(512 322) scale(9)" d="M0 5.2C-9.5-2.5-5.6-11.2 0-5.8 5.6-11.2 9.5-2.5 0 5.2z" fill="#ff4d6d"/>
+
+  <!-- shadow under the pair -->
+  <ellipse cx="512" cy="850" rx="250" ry="22" fill="#e85d75" opacity=".18"/>
+
+  <!-- 말랑이 (pink) and 파랑이 (blue) leaning together -->
+  <g transform="rotate(-7 420 850) translate(150 400) scale(5)">
+    <path d="M18 66c0-26 14-44 32-44s32 18 32 44c0 18-14 26-32 26S18 84 18 66z" fill="#ffb4c2" stroke="#e85d75" stroke-width="3"/>
+    <path d="M33 60q5-6 10 0M57 60q5-6 10 0" fill="none" stroke="#2b2124" stroke-width="2.6" stroke-linecap="round"/>
+    <ellipse cx="30" cy="70" rx="6" ry="3.5" fill="#ff8aa3" opacity=".8"/>
+    <ellipse cx="70" cy="70" rx="6" ry="3.5" fill="#ff8aa3" opacity=".8"/>
+    <path d="M45 70q5 5 10 0" fill="none" stroke="#2b2124" stroke-width="2.6" stroke-linecap="round"/>
+  </g>
+  <g transform="rotate(7 604 850) translate(374 400) scale(5)">
+    <path d="M18 66c0-26 14-44 32-44s32 18 32 44c0 18-14 26-32 26S18 84 18 66z" fill="#b8dcff" stroke="#3f86d1" stroke-width="3"/>
+    <path d="M33 60q5-6 10 0M57 60q5-6 10 0" fill="none" stroke="#2b2124" stroke-width="2.6" stroke-linecap="round"/>
+    <ellipse cx="30" cy="70" rx="6" ry="3.5" fill="#ff9fb8" opacity=".8"/>
+    <ellipse cx="70" cy="70" rx="6" ry="3.5" fill="#ff9fb8" opacity=".8"/>
+    <path d="M45 70q5 5 10 0" fill="none" stroke="#2b2124" stroke-width="2.6" stroke-linecap="round"/>
+  </g>
+</svg>

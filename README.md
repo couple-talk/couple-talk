@@ -14,8 +14,8 @@
 - PC에 저장되는 비밀키는 8자 이상의 잠금 비밀번호와 OS 키체인(macOS 키체인, Windows 자격 증명 관리자)에 있는 기기 키를 함께 써서 암호화합니다(PBKDF2 60만 회). 그래서 앱 데이터 폴더만 복사해서는 비밀번호를 맞혀볼 수 없습니다. 키체인을 잃으면(OS 재설치 등) 이 PC를 초기화하고 페어링 코드로 다시 연결하면 됩니다. 평문 대화는 디스크에 쓰지 않습니다.
 - 메시지마다 암호문 안에 일회용 값(nonce)이 들어갑니다. 같은 암호문이 다시 와도 지금 불러온 기록(서버 모드는 최근 500개, PC 모드는 최근 5000개) 안에서는 한 번만 표시하고, "각자 PC에만" 모드에서 서버가 메시지를 지우려면 이 값을 받은 수신자의 확인이 필요합니다. 그래서 인증 토큰만 엿본 쪽은 메시지를 지울 수 없습니다.
 - 서버 주소는 `wss://`만 허용합니다(로컬 테스트용 `ws://localhost`만 예외).
-- 바탕화면 캐릭터에는 "메시지가 왔다"는 신호만 전달되고 메시지 내용은 표시되지 않습니다.
-- 직접 가져온 캐릭터 팩도 방 키로 암호화해서 서버에 올립니다(방마다 최대 4개, 각 8MB). 채팅에는 팩의 해시만 오가고, 받는 쪽은 해시와 팩 내용을 다시 검사한 뒤에만 표시합니다. "각자 PC에만" 모드에서는 상대가 받아가면 서버에서 지웁니다.
+- 바탕화면 캐릭터 위 말풍선에 메시지 내용이 몇 초간 표시됩니다(최대 40자). 내용은 같은 앱 안의 창끼리만 오가고 네트워크로 나가지 않지만, 옆자리에서 화면이 보일 수 있습니다. 설정에서 "말풍선에 내용 숨기기"를 켜면 💬만 표시되고 내용은 캐릭터 창으로 전달되지 않습니다.
+- 직접 가져온 캐릭터 팩도 방 키로 암호화해서 서버에 올립니다(방마다 최대 4개, 각 8MB). 채팅에는 팩의 해시만 오가고, 받는 쪽은 해시와 팩 내용을 다시 검사한 뒤에만 표시합니다. "각자 PC에만" 모드에서는 7일 뒤 서버에서 지웁니다. 받는 쪽은 팩의 압축 해제 크기, 이미지 크기, 포즈·프레임 수를 제한해서 악의적인 팩으로 앱이 멈추지 않게 합니다.
 
 ### 막을 수 없는 것
 
@@ -46,7 +46,24 @@ docker run -d --restart unless-stopped -p 8080:8080 -v couple-talk-data:/data co
 ```
 
 TLS는 앞단에 둡니다. `server/Caddyfile`의 도메인을 바꾼 뒤 `caddy run`을 실행하면 인증서가 자동으로 발급됩니다. 앱에서는 서버 주소를 `wss://도메인`으로 입력합니다.
-환경변수는 `PORT`(기본 8080)와 `DB_PATH`(기본 `data.db`) 두 개입니다. Docker 없이 실행하려면 Node 22.13 이상에서 `npm ci && npm start`를 실행합니다.
+환경변수는 `PORT`(기본 8080), `METRICS_PORT`(기본 9464), `DB_PATH`(기본 `data.db`)입니다. `PORT`는 WebSocket과 상태 확인용 `GET /healthz`만 답하고, 연결 수·방 수·메시지 수 지표(`GET /metrics`, Prometheus 형식)는 `METRICS_PORT`에서만 나갑니다. 지표에 방 ID나 내용은 들어가지 않습니다. `METRICS_PORT`는 외부에 열지 마세요. Docker 없이 실행하려면 Node 22.13 이상에서 `npm ci && npm start`를 실행합니다.
+
+### 맥미니 운영 서버
+
+`wss://couple-talk.tpsg.co.kr`은 맥미니에서 `server/docker-compose.yml`로 떠 있고 Cloudflare 터널이 공개합니다.
+
+- **배포**: `server/`를 바꾼 PR이 `main`에 머지되면 맥미니 self-hosted runner(라벨 `couple-talk-macmini`)에서 `.github/workflows/deploy-server.yml`이 테스트, 이미지 빌드(커밋 SHA 태그), 교체, 터널 너머 `/healthz` 확인까지 합니다. 이미지는 최근 5개만 남깁니다.
+- **롤백**: Actions에서 `deploy server`를 수동 실행하고 `sha`에 되돌릴 `main` 커밋의 전체 40자 SHA를 넣습니다. 맥미니에 남아 있는 그 커밋의 이미지를 다시 띄우고, 없으면 빌드합니다. 헬스 체크와 SHA 태그가 생긴 커밋(이 배포 방식을 넣은 PR) 이전으로는 워크플로가 거부하므로 손으로 배포합니다. 이 워크플로는 맥미니 호스트에서 `npm test`를 돌리므로 Node 22.13 이상이 필요합니다.
+- **모니터링**: mac-infra의 Prometheus가 `couple-talk-server:9464/metrics`를 수집하고, 서버가 1분 넘게 응답하지 않으면 Alertmanager가 메일을 보냅니다.
+- **백업**: DB에는 암호문만 있습니다. 서버를 켠 채로 사본을 만들 수 있습니다.
+
+```sh
+docker exec couple-talk-server node -e "new (require('node:sqlite').DatabaseSync)('/data/data.db').exec(\"VACUUM INTO '/data/backup.db'\")"
+docker cp couple-talk-server:/data/backup.db ./couple-talk-$(date +%F).db
+docker exec couple-talk-server rm /data/backup.db
+```
+
+복원은 서버를 멈추고 사본을 `data` 볼륨의 `data.db`로 넣은 뒤 다시 띄웁니다.
 
 ## 앱 빌드
 
