@@ -1,4 +1,4 @@
-import { emit, emitTo, listen } from '@tauri-apps/api/event';
+import { emit, emitTo } from '@tauri-apps/api/event';
 import { currentMonitor, getCurrentWindow, LogicalPosition, LogicalSize, Window, type Monitor } from '@tauri-apps/api/window';
 import { loadPack, type Who } from './pack';
 import type { PetEvent } from './tauri';
@@ -102,7 +102,8 @@ const otherPet = who === 'me' ? 'pet' : 'pet-me';
 const floorKey = () => `${area.x},${area.y}`;
 type PetPos = { x: number; half: number; floor: string; shown: boolean };
 let peer: (PetPos & { at: number }) | null = null;
-await listen<PetPos>('pet-pos', ({ payload }) => { peer = payload.shown ? { ...payload, at: Date.now() } : null; });
+// win.listen, not listen: a global listener is target Any and also gets every emitTo meant for the other pet.
+await win.listen<PetPos>('pet-pos', ({ payload }) => { peer = payload.shown ? { ...payload, at: Date.now() } : null; });
 let ticks = 0;
 let pauseUntil = 0;
 let reactPose = '';
@@ -181,7 +182,7 @@ function react(r: Reaction, say?: string) {
   }, ms);
 }
 
-await listen<PetEvent>('pet', async ({ payload: e }) => {
+await win.listen<PetEvent>('pet', async ({ payload: e }) => {
   if (e.type === 'reload') {
     ({ manifest, url, builtin } = await loadPack(who));
     preload();
