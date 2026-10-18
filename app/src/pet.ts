@@ -1,5 +1,5 @@
 import { emit, emitTo, listen } from '@tauri-apps/api/event';
-import { currentMonitor, getCurrentWindow, LogicalPosition, LogicalSize, PhysicalPosition, Window, type Monitor } from '@tauri-apps/api/window';
+import { currentMonitor, getCurrentWindow, LogicalPosition, LogicalSize, Window, type Monitor } from '@tauri-apps/api/window';
 import { loadPack, type Who } from './pack';
 import type { PetEvent } from './tauri';
 
@@ -68,25 +68,25 @@ animate();
 // SMALL leaves 50px above the 100px character for emoji bubbles; keep it in sync with tauri.conf.json.
 const SMALL = { w: 120, h: 150 };
 const BIG = { w: 220, h: 220 };
-// The work area the pet walks on. Dropping it on another monitor switches to that monitor's floor.
-type Area = { x: number; y: number; w: number; h: number; scale: number };
-const toArea = (m: Monitor): Area => ({
-  x: m.workArea.position.x, y: m.workArea.position.y, w: m.workArea.size.width, h: m.workArea.size.height, scale: m.scaleFactor,
-});
+// The work area the pet walks on, in logical pixels. Dropping it on another monitor switches to that monitor's floor.
+// Everything here is logical: Tauri turns a physical window position into logical with the *window's* scale factor,
+// which can still be the old monitor's right after a drop, and that put pets off screen between 1x and 2x monitors.
+type Area = { x: number; y: number; w: number; h: number };
+const toArea = ({ workArea: { position: p, size: s }, scaleFactor: f }: Monitor): Area => ({ x: p.x / f, y: p.y / f, w: s.width / f, h: s.height / f });
 let area = toArea((await currentMonitor())!);
 let size = SMALL;
 // x is the character's center, so resizing the window around it doesn't move the character.
-const half = () => (size.w * area.scale) / 2;
+const half = () => size.w / 2;
 const minX = () => area.x + half();
 const maxX = () => area.x + area.w - half();
 // Start apart: mine left of center, the partner's near the right edge.
-let x = who === 'me' ? area.x + area.w / 2 - 80 * area.scale : maxX() - 40 * area.scale;
+let x = who === 'me' ? area.x + area.w / 2 - 80 : maxX() - 40;
 let dir = -1;
 // While dragging, the pointer owns the window position.
 let drag: { sx: number; sy: number; cx: number; cy: number; moved: boolean; win: { x: number; y: number } | null } | null = null;
 const place = async () => {
   if (drag?.moved) return;
-  await win.setPosition(new PhysicalPosition(Math.round(x - half()), Math.round(area.y + area.h - size.h * area.scale)));
+  await win.setPosition(new LogicalPosition(Math.round(x - half()), Math.round(area.y + area.h - size.h)));
 };
 async function resize(next: typeof SMALL) {
   if (next === size) return;
@@ -122,8 +122,8 @@ setInterval(() => {
   if (Math.random() < 0.005) { pauseUntil = now + 2000 + Math.random() * 6000; return; }
   if (Math.random() < 0.003) dir = -dir;
   const p = peer && Date.now() - peer.at < 1000 && peer.floor === floorKey() ? peer : null;
-  if (p && Math.abs(p.x - x) < p.half + half() + 20 * area.scale && Math.sign(p.x - x) === dir) dir = -dir;
-  x += dir * manifest.speed * area.scale;
+  if (p && Math.abs(p.x - x) < p.half + half() + 20 && Math.sign(p.x - x) === dir) dir = -dir;
+  x += dir * manifest.speed;
   const min = minX(), max = maxX();
   if (x <= min || x >= max) { dir = -dir; x = Math.min(Math.max(x, min), max); }
   pet.classList.toggle('left', dir < 0);
@@ -237,17 +237,17 @@ pet.onpointermove = (e) => {
   });
 };
 pet.onpointerup = pet.onpointercancel = async () => {
-  if (!drag) return;
-  dragged = drag.moved; // read by the click that follows this pointerup
+  const d = drag;
+  if (!d) return;
+  dragged = d.moved; // read by the click that follows this pointerup
   drag = null;
   pet.classList.remove('dragging');
-  if (!dragged) return;
+  if (!dragged || !d.win) return;
   // Land on the floor of whichever monitor the OS says the window ended up on, and stand there a moment.
   while (following) await new Promise((r) => requestAnimationFrame(r));
   const m = await currentMonitor();
   if (m) area = toArea(m);
-  const w = await win.outerPosition();
-  x = Math.min(Math.max(w.x + half(), minX()), maxX());
+  x = Math.min(Math.max(d.win.x + d.cx - d.sx + half(), minX()), maxX());
   pauseUntil = Date.now() + 1500;
   await place();
 };
