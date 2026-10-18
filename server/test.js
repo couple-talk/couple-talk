@@ -9,12 +9,13 @@ import { createHash, randomBytes } from 'node:crypto';
 import WebSocket from 'ws';
 
 const PORT = 18080;
+const METRICS_PORT = 18081;
 const DB_PATH = join(mkdtempSync(join(tmpdir(), 'ct-')), 'test.db');
 // start from the pre-receipt schema to cover the migration
 new DatabaseSync(DB_PATH).exec(`CREATE TABLE messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, sender TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL)`);
 const srv = spawn('node', ['server.js'], {
-  env: { ...process.env, PORT, DB_PATH },
+  env: { ...process.env, PORT, METRICS_PORT, DB_PATH },
   stdio: 'inherit',
 });
 await new Promise((r) => setTimeout(r, 500));
@@ -120,6 +121,20 @@ try {
   for (let i = 0; i < 61; i++) replies.push(await spam.next());
   assert.equal(replies.at(-1).error, 'rate limited');
   spam.close();
+
+  // health on the public port, metrics only on the internal one
+  assert.equal(await (await fetch(`http://localhost:${PORT}/healthz`)).text(), 'ok');
+  assert.equal((await fetch(`http://localhost:${PORT}/metrics`)).status, 404);
+  const metrics = await (await fetch(`http://localhost:${METRICS_PORT}/metrics`)).text();
+  assert.match(metrics, /^couple_talk_rooms [1-9]\d*$/m);
+  assert.match(metrics, /^couple_talk_messages_total [1-9]\d*$/m);
+  assert.match(metrics, /^couple_talk_connections \d+$/m);
+  assert.ok(!/[A-Za-z0-9_-]{43}/.test(metrics), 'no room ids in metrics');
+
+  // a DB failure must not take the relay down through a metrics scrape
+  new DatabaseSync(DB_PATH).exec('DROP TABLE rooms');
+  assert.equal((await fetch(`http://localhost:${METRICS_PORT}/metrics`)).status, 503);
+  assert.equal((await fetch(`http://localhost:${PORT}/healthz`)).status, 503, 'process still up after the failed scrape');
 
   console.log('server ok');
   for (const ws of [a, b, c, la, intruder, lb, lb2]) ws.close();
