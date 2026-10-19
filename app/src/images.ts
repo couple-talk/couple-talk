@@ -118,11 +118,14 @@ const toDataUrl = (blob: Blob) => new Promise<string>((ok, fail) => {
   r.readAsDataURL(blob);
 });
 
-/** Decodes through an <img> (the CSP allows self and data: sources), draws it down to `side`, re-encodes. */
-async function shrink(src: string, side: number, mime: ImageFile['mime']) {
+/**
+ * Decodes through an <img> (the CSP allows self and data: sources), draws it at `side`, re-encodes.
+ * Photos only shrink; stickers also grow, since the built-in character is a small SVG.
+ */
+async function shrink(src: string, side: number, mime: ImageFile['mime'], grow: boolean) {
   const img = new Image();
   await new Promise<void>((ok, fail) => { img.onload = () => ok(); img.onerror = () => fail(new Error('이미지 파일이 아니에요')); img.src = src; });
-  const scale = Math.min(1, side / Math.max(img.naturalWidth, img.naturalHeight, 1));
+  const scale = Math.min(grow ? Infinity : 1, side / Math.max(img.naturalWidth, img.naturalHeight, 1));
   const w = Math.max(1, Math.round(img.naturalWidth * scale)), h = Math.max(1, Math.round(img.naturalHeight * scale));
   const canvas = Object.assign(document.createElement('canvas'), { width: w, height: h });
   canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
@@ -143,7 +146,7 @@ async function sendImage(src: string, sticker: boolean) {
   sending = true;
   try {
     status.textContent = '사진 준비 중…';
-    const { bytes, w, h } = await shrink(src, sticker ? STICKER_SIDE : PHOTO_SIDE, sticker ? 'image/png' : 'image/jpeg');
+    const { bytes, w, h } = await shrink(src, sticker ? STICKER_SIDE : PHOTO_SIDE, sticker ? 'image/png' : 'image/jpeg', sticker);
     const blob = await seal(room.key, { mime: sticker ? 'image/png' : 'image/jpeg', data: b64(bytes) } satisfies ImageFile);
     if (blob.length > IMAGE_FILE_MAX) throw new Error('사진이 너무 커요');
     const hash = await receiptOf(blob);
