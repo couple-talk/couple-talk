@@ -66,6 +66,8 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
     packs: () => packs,
     putFile: (hash: string, blob: string) => put('file', hash, blob),
     getFile: (hash: string) => request('file' + hash, [{ op: 'get', kind: 'file', hash }], 300_000).then((m) => m.blob as string | null),
+    /** Tells a local-mode relay this PC stored its copy, so the relay can drop the file. */
+    ackFile: (hash: string) => send({ op: 'ack', kind: 'file', hash }),
     /** null until the relay's `ready` arrived; false on a relay without photo support. */
     files: () => files,
     send: (blob: string, receipt: string) => send({ op: 'send', blob, receipt }),

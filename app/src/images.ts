@@ -32,7 +32,7 @@ function store<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReques
   });
 }
 const cached = (hash: string) => store<string | undefined>('readonly', (s) => s.get(hash)).catch(() => undefined);
-const cache = (hash: string, blob: string) => store<void>('readwrite', (s) => s.put(blob, hash)).catch(() => {});
+const cache = (hash: string, blob: string) => store<void>('readwrite', (s) => s.put(blob, hash)).then(() => true, () => false);
 
 /** The sealed blob for `hash`, from this PC or else the relay (then kept here). */
 async function fetchSealed(hash: string) {
@@ -42,12 +42,14 @@ async function fetchSealed(hash: string) {
   const blob = await net.getFile(hash);
   // The relay checks this too, but it must not be able to swap in another file from this room.
   if (!blob || (await receiptOf(blob)) !== hash) throw new Error('서버에 사진이 없어요');
-  await cache(hash, blob);
+  // Only a stored copy is acked: a local-mode relay deletes the file on it, and a failed IndexedDB write
+  // would otherwise lose the photo for good.
+  if (await cache(hash, blob)) net.ackFile(hash);
   return blob;
 }
 
 /**
- * In "each PC only" rooms the relay deletes a photo once we fetched it and the message once we acked it,
+ * In "each PC only" rooms the relay keeps a photo only until this PC stores and acks it (or 7 days),
  * so the ciphertext is fetched right away even when it won't be shown yet.
  */
 export function keepFile(hash: string) {

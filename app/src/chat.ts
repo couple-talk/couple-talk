@@ -78,7 +78,7 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
     row.className = `msg ${mine ? 'mine' : 'theirs'}`;
     const body = p.type === 'chat' ? Object.assign(document.createElement('span'), { className: 'bubble', textContent: p.text }) : imageElement(p);
     row.append(body, Object.assign(document.createElement('span'), { className: 'time' }));
-    // The relay forgets a local-room photo once fetched, so take it now even if it isn't shown yet.
+    // A local-room photo lives on the relay only until this PC has stored it, so take it now even if it isn't shown yet.
     if (p.type === 'image' && !mine && config!.mode === 'local') keepFile(p.file);
     rendered(it.id, mine, live, mine ? row : undefined);
   } else {

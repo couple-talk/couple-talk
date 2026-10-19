@@ -162,7 +162,12 @@ try {
   assert.equal((await fb.next()).blob, null, 'the oldest photo goes when the room budget overflows');
   fb.put({ op: 'get', kind: 'file', hash: sha(photo3) });
   assert.equal((await fb.next()).blob, photo3, 'newer photos stay');
-  // local rooms: the relay forgets a photo once the other side has fetched it
+  // scrolling a photo-heavy history must not eat the chat budget
+  for (let i = 0; i < 61; i++) fb.put({ op: 'get', kind: 'file', hash: sha(photo3) });
+  for (let i = 0; i < 61; i++) await fb.next();
+  fb.put({ op: 'send', blob: 'AFTER-PHOTOS', receipt: receiptOf(id()) });
+  assert.equal((await fb.next()).blob, 'AFTER-PHOTOS', 'photo fetches have their own rate budget');
+  // local rooms: the relay forgets a photo once the other side acks that it stored its copy
   const lf1 = await client({ ...lroom, device: id() });
   await lf1.next();
   const lf2 = await client({ ...lroom, device: id() });
@@ -170,12 +175,22 @@ try {
   const lphoto = 'L'.repeat(100 * 1024);
   uploadFile(lf1, lphoto);
   await lf1.next();
-  lf1.put({ op: 'get', kind: 'file', hash: sha(lphoto) });
-  assert.equal((await lf1.next()).blob, lphoto, 'the sender fetching does not delete');
   lf2.put({ op: 'get', kind: 'file', hash: sha(lphoto) });
   assert.equal((await lf2.next()).blob, lphoto);
   lf2.put({ op: 'get', kind: 'file', hash: sha(lphoto) });
-  assert.equal((await lf2.next()).blob, null, 'deleted once the other side has it');
+  assert.equal((await lf2.next()).blob, lphoto, 'fetching alone keeps it (the copy may not have been stored)');
+  lf1.put({ op: 'ack', kind: 'file', hash: sha(lphoto) });
+  await new Promise((r) => setTimeout(r, 100));
+  lf2.put({ op: 'get', kind: 'file', hash: sha(lphoto) });
+  assert.equal((await lf2.next()).blob, lphoto, 'the sender acking does not delete');
+  lf2.put({ op: 'ack', kind: 'file', hash: sha(lphoto) });
+  await new Promise((r) => setTimeout(r, 100));
+  lf2.put({ op: 'get', kind: 'file', hash: sha(lphoto) });
+  assert.equal((await lf2.next()).blob, null, 'deleted once the other side acked');
+  fb.put({ op: 'ack', kind: 'file', hash: sha(photo3) });
+  await new Promise((r) => setTimeout(r, 100));
+  fb.put({ op: 'get', kind: 'file', hash: sha(photo3) });
+  assert.equal((await fb.next()).blob, photo3, 'server rooms ignore file acks');
   for (const ws of [fa, fb, lf1, lf2]) ws.close();
 
   // per-socket send rate limit
