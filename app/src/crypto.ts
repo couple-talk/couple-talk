@@ -40,6 +40,14 @@ export async function deriveRoom(secret: Bytes): Promise<Room> {
   };
 }
 
+/** Person id for a config from before #7: the same on each of my PCs (same secret, same first nickname),
+ *  so they keep agreeing on who I am without being linked again. */
+export async function legacyPerson(secret: Bytes, nick: string) {
+  const base = await crypto.subtle.importKey('raw', secret, 'HKDF', false, ['deriveBits']);
+  const info = enc.encode(`couple-talk/v1/person/${nick}`);
+  return b64(new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info }, base, 256)));
+}
+
 export async function seal(key: CryptoKey, payload: unknown): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(payload)));

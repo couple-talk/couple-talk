@@ -1,7 +1,7 @@
 // Run: node scripts/crypto-check.ts
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { deriveRoom, open, randomId, receiptOf, seal, unwrapSecret, wrapSecret } from '../src/crypto.ts';
+import { deriveRoom, legacyPerson, open, randomId, receiptOf, seal, unwrapSecret, wrapSecret } from '../src/crypto.ts';
 
 const secret = crypto.getRandomValues(new Uint8Array(32));
 const a = await deriveRoom(secret);
@@ -38,5 +38,13 @@ await assert.rejects(unwrapSecret(rewrapped, '1234', pepper), 'the old password 
 
 const nonce = randomId();
 assert.equal(await receiptOf(nonce), createHash('sha256').update(nonce).digest('base64url'));
+
+// Two of my PCs set up before #7 must agree on my person id without being linked again.
+const person = await legacyPerson(secret, '곰');
+assert.equal(person, await legacyPerson(secret, '곰'));
+assert.match(person, /^[\w-]{43}$/);
+assert.notEqual(person, await legacyPerson(secret, '토끼'));
+assert.notEqual(person, await legacyPerson(crypto.getRandomValues(new Uint8Array(32)), '곰'));
+assert.notEqual(person, a.roomId, 'unrelated to the ids the relay sees');
 
 console.log('crypto ok');

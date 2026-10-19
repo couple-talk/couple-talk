@@ -1,12 +1,12 @@
 // The unlocked room: connection, history, rendering and sending.
-import { deriveRoom, open, randomId, receiptOf, seal, type Bytes, type Room } from './crypto';
+import { deriveRoom, legacyPerson, open, randomId, receiptOf, seal, type Bytes, type Room } from './crypto';
 import { applyCharacter, wanted } from './characters';
 import { imageElement, keepFile } from './images';
 import { connect, type Item } from './net';
 import type { Who } from './pack';
 import { connected, looking, receiveSignal, rendered, startPresence } from './presence';
 import { ACTIONS, isValid, STATUSES, type Mode, type Payload } from './protocol';
-import { $, config, isMe, load, save, show } from './state';
+import { $, config, isMe, load, save, setConfig, show } from './state';
 import { notify, petEmit, petListen } from './tauri';
 
 // ponytail: localStorage caps around 5MB; move local history to IndexedDB if couples hit it.
@@ -23,6 +23,8 @@ export let net: ReturnType<typeof connect>;
 export async function start(secret: Bytes) {
   secretBytes = secret;
   room = await deriveRoom(secret);
+  // The first nickname, not the current one: a rename on one of my PCs doesn't reach the others.
+  if (!config!.person) setConfig({ ...config!, person: await legacyPerson(secret, config!.pastNicks?.[0] ?? config!.nick) });
   show('chat');
   $('#me').textContent = config!.nick;
   const local = load<Item[]>('ct.history', []);
@@ -52,7 +54,7 @@ async function receive(it: Item, live: boolean, mode: Mode) {
     save('ct.history', hist.slice(-LOCAL_HISTORY_MAX));
   }
   const p = await render(it, live);
-  if (mode === 'local' && p?.n && !isMe(p.from)) net.ack(it.id, p.n);
+  if (mode === 'local' && p?.n && !isMe(p)) net.ack(it.id, p.n);
 }
 
 /** Returns the payload (even for a replayed copy, so it can still be acked) or null if unreadable. */
@@ -68,7 +70,7 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
     if (seenNonces.has(p.n)) return p;
     seenNonces.add(p.n);
   }
-  const mine = isMe(p.from);
+  const mine = isMe(p);
   // The partner's pet appears (with this name) once we've heard from them.
   if (!mine && load<string | null>('ct.partner', null) !== p.from) { save('ct.partner', p.from); petEmit({ type: 'reload' }); }
   const time = new Date(p.at ?? it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -120,7 +122,7 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
 
 export async function sendPayload(p: Record<string, unknown>) {
   const n = randomId();
-  const ok = net.send(await seal(room.key, { v: 1, from: config!.nick, n, at: Date.now(), ...p }), await receiptOf(n));
+  const ok = net.send(await seal(room.key, { v: 1, from: config!.nick, p: config!.person, n, at: Date.now(), ...p }), await receiptOf(n));
   $('#send-error').textContent = ok ? '' : '연결이 끊겨 있어요. 잠시 후 다시 보내 주세요.';
   return ok;
 }

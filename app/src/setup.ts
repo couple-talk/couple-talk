@@ -1,15 +1,17 @@
 // First-run pairing, unlock and reset. settings.ts reuses the helpers exported here.
 import { b64, randomId, unb64, unwrapSecret, wrapSecret, type Bytes } from './crypto';
 import { secretBytes, start } from './chat';
-import type { Mode } from './protocol';
+import { PERSON_RE, type Mode } from './protocol';
 import { $, config, setConfig } from './state';
 import { deviceKey, petEmit } from './tauri';
 
-function pairingCode(server: string, secret: Bytes, mode: Mode) {
-  return `${server}#${b64(secret)}#${mode}`;
+// The partner's code joins as a new person; the code for my own other PC also carries my person id (#7).
+// Older apps read only the first three fields, so they can still join with either.
+function pairingCode(server: string, secret: Bytes, mode: Mode, person?: string) {
+  return [server, b64(secret), mode, ...(person ? [person] : [])].join('#');
 }
 
-async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: string, pin: string) {
+async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: string, pin: string, person: string) {
   // The wrapped secret can be brute-forced offline by anyone who copies app storage, so short PINs are not enough.
   if (pin.length < 8) throw new Error('잠금 비밀번호는 8자 이상이어야 해요');
   let u: URL;
@@ -18,7 +20,7 @@ async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: stri
     throw new Error('서버 주소는 wss:// 로 시작해야 해요 (로컬 테스트만 ws:// 허용)');
   if (!nick.trim()) throw new Error('닉네임을 입력해 주세요');
   const pepper = await loadDeviceKey(true);
-  setConfig({ server, wrapped: await wrapSecret(secret, pin, pepper), peppered: !!pepper, nick: nick.trim(), mode, device: randomId() });
+  setConfig({ server, wrapped: await wrapSecret(secret, pin, pepper), peppered: !!pepper, nick: nick.trim(), mode, device: randomId(), person });
   petEmit({ type: 'reload' }); // the pet shows my nickname
   await start(secret);
 }
@@ -48,14 +50,15 @@ export function bindForm(id: string, fn: (f: FormData) => Promise<void | string>
 
 bindForm('#create-form', async (f) => {
   const secret = crypto.getRandomValues(new Uint8Array(32));
-  await finishSetup(String(f.get('server')).trim(), secret, f.get('mode') as Mode, String(f.get('nick')), String(f.get('pin')));
-  showCode();
+  await finishSetup(String(f.get('server')).trim(), secret, f.get('mode') as Mode, String(f.get('nick')), String(f.get('pin')), randomId());
+  showCode('partner');
 });
 
 bindForm('#join-form', async (f) => {
-  const [server, secret, mode] = String(f.get('code')).trim().split('#');
-  if (!server || !secret || (mode !== 'server' && mode !== 'local')) throw new Error('코드 형식이 올바르지 않아요');
-  await finishSetup(server, unb64(secret), mode, String(f.get('nick')), String(f.get('pin')));
+  const [server, secret, mode, person] = String(f.get('code')).trim().split('#');
+  if (!server || !secret || (mode !== 'server' && mode !== 'local') || (person !== undefined && !PERSON_RE.test(person)))
+    throw new Error('코드 형식이 올바르지 않아요');
+  await finishSetup(server, unb64(secret), mode, String(f.get('nick')), String(f.get('pin')), person ?? randomId());
 });
 
 bindForm('#unlock-form', async (f) => {
@@ -94,10 +97,14 @@ export function bindReset(id: string) {
 }
 bindReset('#reset');
 
-function showCode() {
-  $('#code').textContent = pairingCode(config!.server, secretBytes, config!.mode);
+function showCode(kind: 'partner' | 'mine') {
+  $('#code').textContent = pairingCode(config!.server, secretBytes, config!.mode, kind === 'mine' ? config!.person : undefined);
+  $('#code-for').textContent = kind === 'mine'
+    ? '내 다른 PC에서 "코드로 참여하기"에 넣는 코드예요. 상대에게 주면 상대가 나로 들어와요.'
+    : '상대에게 줄 코드예요. 내 다른 PC에는 설정의 "내 다른 PC용 코드"를 쓰세요.';
   $<HTMLDialogElement>('#code-dialog').showModal();
 }
 
-$('#show-code').onclick = showCode;
+$('#show-code').onclick = () => showCode('partner');
+$('#show-my-code').onclick = () => showCode('mine');
 $('#copy-code').onclick = () => navigator.clipboard.writeText($('#code').textContent!);

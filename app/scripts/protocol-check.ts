@@ -1,7 +1,7 @@
 // Run: node scripts/protocol-check.ts
 // Payload validation guards rendering against a partner's client (or a tampered history), so it is checked here.
 import assert from 'node:assert/strict';
-import { IMAGE_FILE_MAX, IMAGE_MAX_SIDE, isImageFile, isValid } from '../src/protocol.ts';
+import { IMAGE_FILE_MAX, IMAGE_MAX_SIDE, isImageFile, isSignal, isValid, sentBy } from '../src/protocol.ts';
 
 const hash = 'a'.repeat(43);
 const image = { v: 1, from: 'me', type: 'image', file: hash, w: 1280, h: 960 };
@@ -21,5 +21,17 @@ assert.ok(!isImageFile({ mime: 'image/svg+xml', data: 'abc' }), 'only formats th
 assert.ok(!isImageFile({ mime: 'image/jpeg', data: 'x'.repeat(IMAGE_FILE_MAX + 1) }));
 assert.ok(!isImageFile({ mime: 'image/jpeg' }));
 assert.ok(!isImageFile(null));
+
+// Person ids (#7): the id decides when present, so two people with one nickname are told apart.
+const me = { person: 'm'.repeat(43), nicks: ['곰', '곰돌이'] };
+assert.ok(sentBy({ from: '토끼', p: me.person }, me), 'my other PC, renamed there');
+assert.ok(!sentBy({ from: '곰', p: 'x'.repeat(43) }, me), 'partner using my nickname');
+assert.ok(sentBy({ from: '곰돌이' }, me), 'no id (older app, old message): my past nickname');
+assert.ok(!sentBy({ from: '토끼' }, me));
+assert.ok(isValid({ v: 1, from: 'me', p: me.person, type: 'chat', text: 'hi' }));
+assert.ok(!isValid({ v: 1, from: 'me', p: 'short', type: 'chat', text: 'hi' }), 'p must look like a randomId');
+assert.ok(!isValid({ v: 1, from: 'me', p: 1, type: 'chat', text: 'hi' }));
+assert.ok(isSignal({ v: 1, type: 'here', from: 'me', p: me.person, read: 0 }));
+assert.ok(!isSignal({ v: 1, type: 'here', from: 'me', p: 'short', read: 0 }));
 
 console.log('protocol ok');

@@ -24,7 +24,7 @@ async function beat() {
   // Judged on every beat, not only on focus events: a WebView restored from the tray may send none,
   // so what I'm looking at counts as read within one beat at the latest.
   if (looking()) myRead = Math.max(myRead, newestTheirs);
-  const s: Signal = { v: 1, type: 'here', from: config!.nick, read: myRead };
+  const s: Signal = { v: 1, type: 'here', from: config!.nick, p: config!.person, read: myRead };
   net.signal(await seal(room.key, s));
 }
 
@@ -61,7 +61,7 @@ export function rendered(id: number, mine: boolean, live: boolean, row?: HTMLEle
 export async function receiveSignal(blob: string) {
   let s: unknown;
   try { s = await open(room.key, blob); } catch { return; }
-  if (!isSignal(s) || isMe(s.from)) return;
+  if (!isSignal(s) || isMe(s)) return;
   const before = partner;
   partner = { seen: Date.now(), read: Math.max(partner.read, Math.min(s.read, newest)) };
   save('ct.presence', partner);
