@@ -19,14 +19,16 @@ const looking = () => document.visibilityState === 'visible' && document.hasFocu
 /** Sends my heartbeat. Does nothing until connected to a relay that relays signals. */
 async function beat() {
   if (!net) return;
+  // Judged on every beat, not only on focus events: a WebView restored from the tray may send none,
+  // so what I'm looking at counts as read within one beat at the latest.
+  if (looking()) myRead = Math.max(myRead, newestTheirs);
   const s: Signal = { v: 1, type: 'here', from: config!.nick, read: myRead };
   net.signal(await seal(room.key, s));
 }
 
+/** Signals right away when something new became read instead of waiting for the next beat. */
 function markRead() {
-  if (!looking() || newestTheirs <= myRead) return;
-  myRead = newestTheirs;
-  beat();
+  if (looking() && newestTheirs > myRead) beat();
 }
 
 function paint(row: HTMLElement) {
@@ -52,9 +54,11 @@ export async function receiveSignal(blob: string) {
   let s: unknown;
   try { s = await open(room.key, blob); } catch { return; }
   if (!isSignal(s) || s.from === config!.nick) return;
+  const before = partner;
   partner = { seen: Date.now(), read: Math.max(partner.read, Math.min(s.read, newest)) };
   save('ct.presence', partner);
-  document.querySelectorAll<HTMLElement>('#messages .msg.mine[data-id]').forEach(paint);
+  // Marks only change when they read further or on their first signal, so don't repaint thousands of rows per beat.
+  if (partner.read !== before.read || !before.seen) document.querySelectorAll<HTMLElement>('#messages .msg.mine[data-id]').forEach(paint);
   showPresence();
 }
 
@@ -75,7 +79,6 @@ function showPresence() {
 
 /** After each history replay: announce myself right away instead of on the next beat. */
 export function connected() {
-  if (looking()) myRead = Math.max(myRead, newestTheirs);
   beat();
 }
 
