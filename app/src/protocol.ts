@@ -23,3 +23,12 @@ export function isValid(p: unknown): p is Payload {
     return (o.pack === null || (typeof o.pack === 'string' && /^[\w-]{43}$/.test(o.pack))) && typeof o.name === 'string' && o.name.length <= 20;
   return o.type === 'action' && typeof o.kind === 'string' && Object.hasOwn(ACTIONS, o.kind);
 }
+
+// Sent sealed over the `signal` op (never stored): a heartbeat that also carries how far I've read.
+// read: id of the newest partner message I've seen in a focused window. Server ids are the same on both sides.
+export type Signal = { v: 1; type: 'here'; from: string; read: number };
+
+export function isSignal(p: unknown): p is Signal {
+  const o = p as Record<string, unknown> | null;
+  return !!o && typeof o === 'object' && o.type === 'here' && typeof o.from === 'string' && Number.isSafeInteger(o.read) && (o.read as number) >= 0;
+}

@@ -4,6 +4,7 @@ export type Item = { id: number; ts: number; blob: string };
 type Handlers = {
   onReady: (mode: 'server' | 'local', items: Item[]) => void;
   onMsg: (item: Item) => void;
+  onSignal: (blob: string) => void;
   onState: (online: boolean, error?: string) => void;
 };
 
@@ -13,6 +14,8 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
   let fatal = false;
   // Pack upload protocol the relay advertised in `ready`: null until then, 0 for relays that predate it.
   let packs: number | null = null;
+  // Whether the relay advertised the `signal` op; older ones would answer it with 'unknown op'.
+  let signals = false;
   // put/get replies arrive as op 'stored'/'pack' keyed by hash; error replies echo the hash.
   type Wait = { p: Promise<any>; ok: (m: any) => void; fail: (e: Error) => void };
   const waits = new Map<string, Wait>();
@@ -23,8 +26,9 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
     ws.onopen = () => ws.send(JSON.stringify({ op: 'auth', v: 1, ...auth, since: since() }));
     ws.onmessage = (e) => {
       const m = JSON.parse(e.data);
-      if (m.op === 'ready') { packs = m.packs ?? 0; h.onState(true); h.onReady(m.mode, m.items); }
+      if (m.op === 'ready') { packs = m.packs ?? 0; signals = m.signals === 1; h.onState(true); h.onReady(m.mode, m.items); }
       else if (m.op === 'msg') h.onMsg(m);
+      else if (m.op === 'signal' && typeof m.blob === 'string') h.onSignal(m.blob);
       else if (m.op === 'stored' || m.op === 'pack') settle(m.op + m.hash, (w) => w.ok(m));
       else if (m.op === 'error') {
         fatal = m.error === 'unauthorized';
@@ -32,7 +36,7 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
         else if (m.error === 'unknown op') failAll(new Error(m.error)); // relay without pack support
       }
     };
-    ws.onclose = () => { packs = null; failAll(new Error('offline')); h.onState(false, fatal ? 'unauthorized' : undefined); if (!fatal) setTimeout(open, 3000); };
+    ws.onclose = () => { packs = null; signals = false; failAll(new Error('offline')); h.onState(false, fatal ? 'unauthorized' : undefined); if (!fatal) setTimeout(open, 3000); };
   };
   open();
   const send = (m: object) => ws.readyState === WebSocket.OPEN && (ws.send(JSON.stringify(m)), true);
@@ -59,5 +63,7 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
     packs: () => packs,
     send: (blob: string, receipt: string) => send({ op: 'send', blob, receipt }),
     ack: (id: number, receipt: string) => send({ op: 'ack', id, receipt }),
+    /** Relayed live to whoever else is in the room, never stored. False if not connected or the relay can't. */
+    signal: (blob: string) => signals && send({ op: 'signal', blob }),
   };
 }
