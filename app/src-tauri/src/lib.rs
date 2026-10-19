@@ -4,8 +4,9 @@ use tauri::{AppHandle, Emitter, Manager, image::Image};
 use tauri_plugin_notification::NotificationExt;
 
 const KEYCHAIN_SERVICE: &str = "dev.coupletalk.app";
+#[cfg(desktop)]
 const TRAY_ID: &str = "main";
-// One shortcut for both platforms; a configurable one can come later if it clashes with something.
+// One shortcut for both platforms; a configurable one can come later if it clashes with something (see setup_shortcut).
 #[cfg(desktop)]
 const HIDE_ALL_SHORTCUT: &str = "CmdOrCtrl+Shift+H";
 
@@ -142,6 +143,7 @@ fn set_unread(app: AppHandle, n: i64) {
         #[cfg(not(target_os = "windows"))]
         let _ = main.set_badge_count(badge);
     }
+    #[cfg(desktop)]
     if let (Some(tray), Some(icon)) = (app.tray_by_id(TRAY_ID), app.default_window_icon()) {
         let _ = tray.set_icon(Some(if badge.is_some() { icon_with_dot(icon) } else { icon.clone() }));
         let _ = tray.set_tooltip(Some(match badge {
@@ -152,9 +154,13 @@ fn set_unread(app: AppHandle, n: i64) {
 }
 
 /// OS notification for a new message. Without `body` only "새 메시지가 왔어요" is shown, which is the default:
-/// the text may be on a screen someone else can see.
+/// the text may be on a screen someone else can see. While everything is hidden with the shortcut nothing is
+/// shown at all (that is what the shortcut is for); the badge still counts.
 #[tauri::command]
 fn notify(app: AppHandle, body: Option<String>) -> Result<(), String> {
+    if with_vis(&app, |v| v.stealth) {
+        return Ok(());
+    }
     app.notification()
         .builder()
         .title("couple-talk")
@@ -193,20 +199,21 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Registers the hide-all shortcut. Another program may already own the key combination (RegisterHotKey fails
+/// on Windows then), so a failure only loses the shortcut, never the app: the tray menu still works.
 #[cfg(desktop)]
 fn setup_shortcut(app: &AppHandle) -> tauri::Result<()> {
-    use tauri_plugin_global_shortcut::{Builder, ShortcutState};
-    app.plugin(
-        Builder::new()
-            .with_shortcut(HIDE_ALL_SHORTCUT)
-            .map_err(|e| tauri::Error::Anyhow(e.into()))?
-            .with_handler(|app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    toggle_stealth(app);
-                }
-            })
-            .build(),
-    )
+    use tauri_plugin_global_shortcut::{Builder, GlobalShortcutExt, ShortcutState};
+    app.plugin(Builder::new().build())?;
+    let registered = app.global_shortcut().on_shortcut(HIDE_ALL_SHORTCUT, |app, _shortcut, event| {
+        if event.state == ShortcutState::Pressed {
+            toggle_stealth(app);
+        }
+    });
+    if let Err(e) = registered {
+        eprintln!("hide-all shortcut {HIDE_ALL_SHORTCUT} unavailable: {e}");
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -37,7 +37,7 @@ preload();
 const stored = (k: string) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null'); } catch { return null; } };
 let shown = true; // windows start visible (tauri.conf.json)
 // The tray menu and the hide-all shortcut (#5) can hide both pets; the main process says so.
-let allowed: boolean = await invoke('pets_visible');
+let allowed = true;
 async function showIdentity() {
   const name: string | null = who === 'me' ? stored('ct.config')?.nick ?? null : stored('ct.partner');
   document.getElementById('tag')!.textContent = name ?? (who === 'me' ? '나' : '');
@@ -46,8 +46,10 @@ async function showIdentity() {
   // show() can take focus on macOS, so only toggle on an actual change.
   if (shown !== want) { shown = want; await (shown ? win.show() : win.hide()); }
 }
-await showIdentity();
+// Listen first, then ask for the current state, so a change in between isn't missed.
 await win.listen<boolean>('pets-visible', async ({ payload }) => { allowed = payload; await showIdentity(); });
+allowed = await invoke('pets_visible');
+await showIdentity();
 
 let pose = '';
 let frame = 0;
