@@ -5,7 +5,7 @@ import { connect, type Item } from './net';
 import type { Who } from './pack';
 import { connected, receiveSignal, rendered, startPresence } from './presence';
 import { ACTIONS, isValid, STATUSES, type Mode, type Payload } from './protocol';
-import { $, config, load, save, show } from './state';
+import { $, config, isMe, load, save, show } from './state';
 import { petEmit, petListen } from './tauri';
 
 // ponytail: localStorage caps around 5MB; move local history to IndexedDB if couples hit it.
@@ -51,7 +51,7 @@ async function receive(it: Item, live: boolean, mode: Mode) {
     save('ct.history', hist.slice(-LOCAL_HISTORY_MAX));
   }
   const p = await render(it, live);
-  if (mode === 'local' && p?.n && p.from !== config!.nick) net.ack(it.id, p.n);
+  if (mode === 'local' && p?.n && !isMe(p.from)) net.ack(it.id, p.n);
 }
 
 /** Returns the payload (even for a replayed copy, so it can still be acked) or null if unreadable. */
@@ -67,7 +67,7 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
     if (seenNonces.has(p.n)) return p;
     seenNonces.add(p.n);
   }
-  const mine = p.from === config!.nick;
+  const mine = isMe(p.from);
   // The partner's pet appears (with this name) once we've heard from them.
   if (!mine && load<string | null>('ct.partner', null) !== p.from) { save('ct.partner', p.from); petEmit({ type: 'reload' }); }
   const time = new Date(p.at ?? it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

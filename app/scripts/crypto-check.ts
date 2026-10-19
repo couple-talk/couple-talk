@@ -31,6 +31,11 @@ const peppered = await wrapSecret(secret, '1234', pepper);
 assert.deepEqual(await unwrapSecret(peppered, '1234', pepper), secret);
 await assert.rejects(unwrapSecret(peppered, '1234'), 'copied storage without the keychain key must not unwrap');
 
+// Password change (#4): the same secret and pepper, re-wrapped; the old password must stop working.
+const rewrapped = await wrapSecret(await unwrapSecret(peppered, '1234', pepper), 'new-password', pepper);
+assert.deepEqual(await unwrapSecret(rewrapped, 'new-password', pepper), secret);
+await assert.rejects(unwrapSecret(rewrapped, '1234', pepper), 'the old password must not unwrap after a change');
+
 const nonce = randomId();
 assert.equal(await receiptOf(nonce), createHash('sha256').update(nonce).digest('base64url'));
 
