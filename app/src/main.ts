@@ -5,12 +5,10 @@ import './chat';
 import './characters';
 import './settings';
 import { $, config, show } from './state';
-import { isTauri, quitApp, setupMainWindow } from './tauri';
+import { setupMainWindow } from './tauri';
 
 const DEFAULT_SERVER = import.meta.env.VITE_DEFAULT_SERVER ?? 'ws://localhost:8080';
 
-$('#quit').hidden = !isTauri;
-$('#quit').onclick = quitApp;
 setupMainWindow();
 
 if (config) show('unlock');
