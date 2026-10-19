@@ -44,7 +44,8 @@ export async function deriveRoom(secret: Bytes): Promise<Room> {
  *  so they keep agreeing on who I am without being linked again. */
 export async function legacyPerson(secret: Bytes, nick: string) {
   const base = await crypto.subtle.importKey('raw', secret, 'HKDF', false, ['deriveBits']);
-  const info = enc.encode(`couple-talk/v1/person/${nick}`);
+  // NFC: macOS and Windows IMEs can store the same Hangul nickname in different normal forms.
+  const info = enc.encode(`couple-talk/v1/person/${nick.normalize('NFC')}`);
   return b64(new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info }, base, 256)));
 }
 

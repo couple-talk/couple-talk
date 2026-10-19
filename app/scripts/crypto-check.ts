@@ -44,6 +44,7 @@ const person = await legacyPerson(secret, '곰');
 assert.equal(person, await legacyPerson(secret, '곰'));
 assert.match(person, /^[\w-]{43}$/);
 assert.notEqual(person, await legacyPerson(secret, '토끼'));
+assert.equal(person, await legacyPerson(secret, '곰'.normalize('NFD')), 'same name typed on another OS');
 assert.notEqual(person, await legacyPerson(crypto.getRandomValues(new Uint8Array(32)), '곰'));
 assert.notEqual(person, a.roomId, 'unrelated to the ids the relay sees');
 

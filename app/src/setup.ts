@@ -1,5 +1,5 @@
 // First-run pairing, unlock and reset. settings.ts reuses the helpers exported here.
-import { b64, randomId, unb64, unwrapSecret, wrapSecret, type Bytes } from './crypto';
+import { b64, legacyPerson, randomId, unb64, unwrapSecret, wrapSecret, type Bytes } from './crypto';
 import { secretBytes, start } from './chat';
 import { PERSON_RE, type Mode } from './protocol';
 import { $, config, setConfig } from './state';
@@ -50,13 +50,17 @@ export function bindForm(id: string, fn: (f: FormData) => Promise<void | string>
 
 bindForm('#create-form', async (f) => {
   const secret = crypto.getRandomValues(new Uint8Array(32));
-  await finishSetup(String(f.get('server')).trim(), secret, f.get('mode') as Mode, String(f.get('nick')), String(f.get('pin')), randomId());
+  const nick = String(f.get('nick')).trim();
+  // Seeded like a pre-#7 config, so my other PC still on an older app gets the same id once it updates.
+  // Only the joiner would collide with it, and a joiner without my id gets a random one.
+  await finishSetup(String(f.get('server')).trim(), secret, f.get('mode') as Mode, nick, String(f.get('pin')), await legacyPerson(secret, nick));
   showCode('partner');
 });
 
 bindForm('#join-form', async (f) => {
-  const [server, secret, mode, person] = String(f.get('code')).trim().split('#');
-  if (!server || !secret || (mode !== 'server' && mode !== 'local') || (person !== undefined && !PERSON_RE.test(person)))
+  const fields = String(f.get('code')).trim().split('#');
+  const [server, secret, mode, person] = fields;
+  if (fields.length > 4 || !server || !secret || (mode !== 'server' && mode !== 'local') || (person !== undefined && !PERSON_RE.test(person)))
     throw new Error('코드 형식이 올바르지 않아요');
   await finishSetup(server, unb64(secret), mode, String(f.get('nick')), String(f.get('pin')), person ?? randomId());
 });
