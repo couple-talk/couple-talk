@@ -27,7 +27,7 @@ button.link { padding: 3px 8px; }
 button.icon { padding: 4px 6px; font-size: 18px; line-height: 1; }
 button.link:not(:disabled):hover, button.icon:not(:disabled):hover { background: var(--theirs); filter: none; }
 input { font: inherit; padding: 8px 12px; border: 1px solid var(--theirs); border-radius: 12px; background: var(--card); color: var(--fg); width: 100%; transition: border-color .15s; }
-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+input:not([type=radio], [type=checkbox]):focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
 input[type=radio], input[type=checkbox] { width: auto; }
 input[type=file] { border-style: dashed; cursor: pointer; }
 input::file-selector-button { font: inherit; border: 0; border-radius: 999px; padding: 4px 12px; margin-right: 8px; background: var(--theirs); color: var(--fg); cursor: pointer; }
