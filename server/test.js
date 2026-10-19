@@ -41,6 +41,7 @@ try {
   const ready = await a.next();
   assert.deepEqual(ready.items, []);
   assert.equal(ready.packs, 2, 'ready advertises the pack upload protocol');
+  assert.equal(ready.signals, 1, 'ready advertises signal relaying');
   const b = await client({ ...room, device: id() });
   await b.next();
   a.put({ op: 'send', blob: 'CIPHER1', receipt: receiptOf(id()) });

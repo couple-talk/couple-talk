@@ -89,7 +89,8 @@ function auth(ws, m) {
     ? q.pending.all(m.roomId, m.device)
     : q.since.all(m.roomId, Number(m.since) || 0, HISTORY_LIMIT).reverse();
   // packs: version of the pack upload protocol (2 = ordered parts). Clients check it before uploading.
-  ws.send(JSON.stringify({ op: 'ready', v: 1, mode: room.mode, items, packs: 2 }));
+  // signals: the `signal` op is relayed. Older relays answer it with 'unknown op', which fails pending pack transfers.
+  ws.send(JSON.stringify({ op: 'ready', v: 1, mode: room.mode, items, packs: 2, signals: 1 }));
 }
 
 /** Per-socket, per-minute budget; `kind` keeps signals from eating into the message budget. */
