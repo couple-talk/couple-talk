@@ -16,7 +16,8 @@ new DatabaseSync(DB_PATH).exec(`CREATE TABLE messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, sender TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL)`);
 const srv = spawn('node', ['server.js'], {
   // Small upload budget and fast heartbeat so the stalled-upload case runs in under a second.
-  env: { ...process.env, PORT, METRICS_PORT, DB_PATH, UPLOADS_MAX: 550 * 1024, UPLOAD_IDLE_MS: 300, HEARTBEAT_MS: 100 },
+  // FILE_ROOM_MAX small enough that a few 150KB photos overflow a room's budget.
+  env: { ...process.env, PORT, METRICS_PORT, DB_PATH, UPLOADS_MAX: 550 * 1024, UPLOAD_IDLE_MS: 300, HEARTBEAT_MS: 100, FILE_ROOM_MAX: 400 * 1024 },
   stdio: 'inherit',
 });
 await new Promise((r) => setTimeout(r, 500));
@@ -42,6 +43,7 @@ try {
   assert.deepEqual(ready.items, []);
   assert.equal(ready.packs, 2, 'ready advertises the pack upload protocol');
   assert.equal(ready.signals, 1, 'ready advertises signal relaying');
+  assert.equal(ready.files, 1, 'ready advertises photo files');
   const b = await client({ ...room, device: id() });
   await b.next();
   a.put({ op: 'send', blob: 'CIPHER1', receipt: receiptOf(id()) });
@@ -127,6 +129,54 @@ try {
   sb.put({ op: 'put', hash: sha(small), part: 0, parts: 1, data: small });
   assert.deepEqual(await sb.next(), { op: 'stored', hash: sha(small) }, 'stalled upload released by heartbeat');
   for (const ws of [pa, pb, other, sa, sb]) ws.close();
+
+  // photos (#10): a separate, larger blob store with a per-room byte budget
+  const uploadFile = (ws, blob, parts = Math.ceil(blob.length / PART)) => {
+    for (let i = 0; i < parts; i++) ws.put({ op: 'put', kind: 'file', hash: sha(blob), part: i, parts, data: blob.slice(i * PART, (i + 1) * PART) });
+  };
+  const fa = await client({ ...room, device: id() });
+  await fa.next();
+  const fb = await client({ ...room, device: id() });
+  await fb.next();
+  const photo1 = 'F'.repeat(300 * 1024);
+  uploadFile(fa, photo1);
+  assert.deepEqual(await fa.next(), { op: 'stored', hash: sha(photo1) }, 'a multi-part photo is stored');
+  fb.put({ op: 'get', kind: 'file', hash: sha(photo1) });
+  assert.deepEqual(await fb.next(), { op: 'file', hash: sha(photo1), blob: photo1 });
+  fb.put({ op: 'get', kind: 'file', hash: sha(photo1) });
+  assert.equal((await fb.next()).blob, photo1, 'server rooms keep photos for other PCs');
+  fb.put({ op: 'get', hash: sha(photo1) });
+  assert.equal((await fb.next()).blob, null, 'photos are not packs');
+  fb.put({ op: 'get', kind: 'file', hash: sha(pack) });
+  assert.equal((await fb.next()).blob, null, 'packs are not photos');
+  fa.put({ op: 'put', kind: 'file', hash: sha(photo1), part: 1, parts: 2, data: 'x' });
+  assert.equal((await fa.next()).error, 'bad request', 'a pack upload cannot be continued as a photo');
+  fa.put({ op: 'put', kind: 'file', hash: id(), part: 0, parts: 17, data: 'x' });
+  assert.equal((await fa.next()).error, 'bad request', 'photos over 3MB are refused up front');
+  const photo2 = 'G'.repeat(150 * 1024), photo3 = 'H'.repeat(150 * 1024);
+  uploadFile(fa, photo2);
+  await fa.next();
+  uploadFile(fa, photo3);
+  await fa.next();
+  fb.put({ op: 'get', kind: 'file', hash: sha(photo1) });
+  assert.equal((await fb.next()).blob, null, 'the oldest photo goes when the room budget overflows');
+  fb.put({ op: 'get', kind: 'file', hash: sha(photo3) });
+  assert.equal((await fb.next()).blob, photo3, 'newer photos stay');
+  // local rooms: the relay forgets a photo once the other side has fetched it
+  const lf1 = await client({ ...lroom, device: id() });
+  await lf1.next();
+  const lf2 = await client({ ...lroom, device: id() });
+  await lf2.next();
+  const lphoto = 'L'.repeat(100 * 1024);
+  uploadFile(lf1, lphoto);
+  await lf1.next();
+  lf1.put({ op: 'get', kind: 'file', hash: sha(lphoto) });
+  assert.equal((await lf1.next()).blob, lphoto, 'the sender fetching does not delete');
+  lf2.put({ op: 'get', kind: 'file', hash: sha(lphoto) });
+  assert.equal((await lf2.next()).blob, lphoto);
+  lf2.put({ op: 'get', kind: 'file', hash: sha(lphoto) });
+  assert.equal((await lf2.next()).blob, null, 'deleted once the other side has it');
+  for (const ws of [fa, fb, lf1, lf2]) ws.close();
 
   // per-socket send rate limit
   const spam = await client({ roomId: id(), token: id(), device: id() });

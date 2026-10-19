@@ -17,6 +17,10 @@ const BLOB_MAX = 64 * 1024;
 const PACK_MAX = 8 * 1024 * 1024;
 const PACK_PART = 192 * 1024;
 const PACKS_PER_ROOM = 4;
+// Photos and stickers (#10) use the same part upload with `kind: 'file'`. Each room has a byte budget, oldest out first;
+// local rooms also delete a file as soon as the other side has fetched it.
+const FILE_MAX = 3 * 1024 * 1024;
+const FILE_ROOM_MAX = Number(process.env.FILE_ROOM_MAX ?? 64 * 1024 * 1024);
 // Signals (presence heartbeats, read marks) are relayed live and never stored, so they get their own small cap and budget.
 const SIGNAL_MAX = 4 * 1024;
 const SIGNALS_PER_MIN = 120;
@@ -41,6 +45,9 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS packs (
     room_id TEXT NOT NULL, sender TEXT NOT NULL, hash TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL,
     PRIMARY KEY (room_id, sender));
+  CREATE TABLE IF NOT EXISTS files (
+    room_id TEXT NOT NULL, sender TEXT NOT NULL, hash TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL,
+    PRIMARY KEY (room_id, hash));
 `);
 // Databases created before delivery receipts: old rows get an unmatchable receipt and just expire.
 if (!db.prepare('PRAGMA table_info(messages)').all().some((c) => c.name === 'receipt'))
@@ -60,8 +67,23 @@ const q = {
   expire: db.prepare(`DELETE FROM messages WHERE ts < ? AND room_id IN (SELECT id FROM rooms WHERE mode = 'local')`),
   // ponytail: server-mode packs are kept (bounded per room) so a new PC can restore them; add a TTL if spam rooms fill the disk.
   expirePacks: db.prepare(`DELETE FROM packs WHERE ts < ? AND room_id IN (SELECT id FROM rooms WHERE mode = 'local')`),
+  putFile: db.prepare('INSERT OR REPLACE INTO files (room_id, sender, hash, ts, blob) VALUES (?, ?, ?, ?, ?)'),
+  getFile: db.prepare('SELECT sender, blob FROM files WHERE room_id = ? AND hash = ?'),
+  delFile: db.prepare('DELETE FROM files WHERE room_id = ? AND hash = ?'),
+  listFiles: db.prepare('SELECT hash, length(blob) AS size FROM files WHERE room_id = ? ORDER BY ts DESC, rowid DESC'),
+  expireFiles: db.prepare(`DELETE FROM files WHERE ts < ? AND room_id IN (SELECT id FROM rooms WHERE mode = 'local')`),
 };
-const expire = () => { q.expire.run(Date.now() - LOCAL_TTL_MS); q.expirePacks.run(Date.now() - LOCAL_TTL_MS); };
+const expire = () => {
+  const before = Date.now() - LOCAL_TTL_MS;
+  q.expire.run(before);
+  q.expirePacks.run(before);
+  q.expireFiles.run(before);
+};
+/** Keeps a room's files within FILE_ROOM_MAX, newest first. */
+function pruneFiles(roomId) {
+  let used = 0;
+  for (const f of q.listFiles.all(roomId)) if ((used += f.size) > FILE_ROOM_MAX) q.delFile.run(roomId, f.hash);
+}
 expire();
 setInterval(expire, 3600 * 1000).unref();
 
@@ -90,7 +112,8 @@ function auth(ws, m) {
     : q.since.all(m.roomId, Number(m.since) || 0, HISTORY_LIMIT).reverse();
   // packs: version of the pack upload protocol (2 = ordered parts). Clients check it before uploading.
   // signals: the `signal` op is relayed. Older relays answer it with 'unknown op', which fails pending pack transfers.
-  ws.send(JSON.stringify({ op: 'ready', v: 1, mode: room.mode, items, packs: 2, signals: 1 }));
+  // files: put/get accept `kind: 'file'` (photos). Older relays would store a photo as the sender's character pack.
+  ws.send(JSON.stringify({ op: 'ready', v: 1, mode: room.mode, items, packs: 2, signals: 1, files: 1 }));
 }
 
 /** Per-socket, per-minute budget; `kind` keeps signals from eating into the message budget. */
@@ -113,13 +136,15 @@ function handle(ws, m) {
     const out = JSON.stringify({ op: 'msg', id, ts: now, blob: m.blob });
     for (const peer of rooms.get(ws.roomId)) peer.send(out);
   } else if (m.op === 'put') {
-    // Parts must arrive in order on one socket: {hash, part: 0..parts-1, parts, data}.
+    // Parts must arrive in order on one socket: {hash, part: 0..parts-1, parts, data, kind?}.
+    const file = m.kind === 'file';
+    const max = file ? FILE_MAX : PACK_MAX;
     const held = ws.upload && Date.now() - ws.upload.at < UPLOAD_IDLE_MS ? ws.upload : null;
     dropUpload(ws);
-    const up = m.part === 0 ? { hash: m.hash, chunks: [], size: 0 } : held;
+    const up = m.part === 0 ? { hash: m.hash, file, chunks: [], size: 0 } : held;
     if (!ID_RE.test(m.hash) || typeof m.data !== 'string' || m.data.length > PACK_PART || !Number.isInteger(m.parts)
-      || m.parts < 1 || m.parts > Math.ceil(PACK_MAX / PACK_PART) || up?.hash !== m.hash || m.part !== up.chunks.length) return 'bad request';
-    if (up.size + m.data.length > PACK_MAX) return 'bad request';
+      || m.parts < 1 || m.parts > Math.ceil(max / PACK_PART) || up?.hash !== m.hash || up.file !== file || m.part !== up.chunks.length) return 'bad request';
+    if (up.size + m.data.length > max) return 'bad request';
     if (uploading + up.size + m.data.length > UPLOADS_MAX) return 'busy';
     up.chunks.push(m.data);
     up.size += m.data.length;
@@ -129,13 +154,25 @@ function handle(ws, m) {
     // Content-addressed: the hash is checked here, so a client can't store a blob under someone else's hash.
     if (m.hash !== sha256b64(blob)) return 'bad request';
     if (limited(ws)) return 'rate limited';
-    q.putPack.run(ws.roomId, ws.device, m.hash, Date.now(), blob);
-    q.prunePacks.run(ws.roomId, ws.roomId);
+    if (file) {
+      q.putFile.run(ws.roomId, ws.device, m.hash, Date.now(), blob);
+      pruneFiles(ws.roomId);
+    } else {
+      q.putPack.run(ws.roomId, ws.device, m.hash, Date.now(), blob);
+      q.prunePacks.run(ws.roomId, ws.roomId);
+    }
     ws.send(JSON.stringify({ op: 'stored', hash: m.hash }));
   } else if (m.op === 'get') {
     if (!ID_RE.test(m.hash)) return 'bad request';
     if (limited(ws)) return 'rate limited';
     if (ws.bufferedAmount > SEND_BUFFER_MAX) return 'busy';
+    if (m.kind === 'file') {
+      const row = q.getFile.get(ws.roomId, m.hash);
+      ws.send(JSON.stringify({ op: 'file', hash: m.hash, blob: row?.blob ?? null }));
+      // "Each PC only": gone from the relay once the other side has it, like an acked message.
+      if (row && ws.mode === 'local' && row.sender !== ws.device) q.delFile.run(ws.roomId, m.hash);
+      return;
+    }
     const row = q.getPack.get(ws.roomId, m.hash);
     ws.send(JSON.stringify({ op: 'pack', hash: m.hash, blob: row?.blob ?? null }));
   } else if (m.op === 'signal') {
