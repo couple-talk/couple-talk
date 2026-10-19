@@ -1,7 +1,7 @@
 // Run: node scripts/protocol-check.ts
 // Payload validation guards rendering against a partner's client (or a tampered history), so it is checked here.
 import assert from 'node:assert/strict';
-import { IMAGE_FILE_MAX, IMAGE_MAX_SIDE, isImageFile, isSignal, isValid, sentBy } from '../src/protocol.ts';
+import { formatPairingCode, IMAGE_FILE_MAX, IMAGE_MAX_SIDE, isImageFile, isSignal, isValid, parsePairingCode, sentBy } from '../src/protocol.ts';
 
 const hash = 'a'.repeat(43);
 const image = { v: 1, from: 'me', type: 'image', file: hash, w: 1280, h: 960 };
@@ -33,5 +33,16 @@ assert.ok(!isValid({ v: 1, from: 'me', p: 'short', type: 'chat', text: 'hi' }), 
 assert.ok(!isValid({ v: 1, from: 'me', p: 1, type: 'chat', text: 'hi' }));
 assert.ok(isSignal({ v: 1, type: 'here', from: 'me', p: me.person, read: 0 }));
 assert.ok(!isSignal({ v: 1, type: 'here', from: 'me', p: 'short', read: 0 }));
+
+// Pairing codes: older apps read only the first three fields, so those must keep their meaning.
+const secret = 's'.repeat(43), partnerCode = { server: 'wss://x', secret, mode: 'server' as const };
+assert.deepEqual(parsePairingCode(`wss://x#${secret}#server`), partnerCode, 'partner code and pre-#7 codes');
+assert.deepEqual(parsePairingCode(`  wss://x#${secret}#local\n`), { ...partnerCode, mode: 'local' });
+assert.deepEqual(parsePairingCode(formatPairingCode(partnerCode)), partnerCode);
+const mine = { ...partnerCode, person: me.person };
+assert.deepEqual(parsePairingCode(formatPairingCode(mine)), mine);
+for (const bad of [`wss://x#${secret}#chat`, `#${secret}#server`, `wss://x##server`, `wss://x#short#server`,
+  `wss://x#${secret}#server#short`, `wss://x#${secret}#server#`, `wss://x#${secret}#server#${me.person}#a#b`])
+  assert.equal(parsePairingCode(bad), null, bad);
 
 console.log('protocol ok');

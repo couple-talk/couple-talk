@@ -1,15 +1,9 @@
 // First-run pairing, unlock and reset. settings.ts reuses the helpers exported here.
 import { b64, legacyPerson, randomId, unb64, unwrapSecret, wrapSecret, type Bytes } from './crypto';
 import { secretBytes, start } from './chat';
-import { PERSON_RE, type Mode } from './protocol';
+import { formatPairingCode, parsePairingCode, type Mode } from './protocol';
 import { $, config, setConfig } from './state';
 import { deviceKey, petEmit } from './tauri';
-
-// The partner's code joins as a new person; the code for my own other PC also carries my person id (#7).
-// Older apps read only the first three fields, so they can still join with either.
-function pairingCode(server: string, secret: Bytes, mode: Mode, person?: string) {
-  return [server, b64(secret), mode, ...(person ? [person] : [])].join('#');
-}
 
 async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: string, pin: string, person: string) {
   // The wrapped secret can be brute-forced offline by anyone who copies app storage, so short PINs are not enough.
@@ -58,11 +52,9 @@ bindForm('#create-form', async (f) => {
 });
 
 bindForm('#join-form', async (f) => {
-  const fields = String(f.get('code')).trim().split('#');
-  const [server, secret, mode, person] = fields;
-  if (fields.length > 4 || !server || !secret || (mode !== 'server' && mode !== 'local') || (person !== undefined && !PERSON_RE.test(person)))
-    throw new Error('코드 형식이 올바르지 않아요');
-  await finishSetup(server, unb64(secret), mode, String(f.get('nick')), String(f.get('pin')), person ?? randomId());
+  const c = parsePairingCode(String(f.get('code')));
+  if (!c) throw new Error('코드 형식이 올바르지 않아요');
+  await finishSetup(c.server, unb64(c.secret), c.mode, String(f.get('nick')), String(f.get('pin')), c.person ?? randomId());
 });
 
 bindForm('#unlock-form', async (f) => {
@@ -102,7 +94,8 @@ export function bindReset(id: string) {
 bindReset('#reset');
 
 function showCode(kind: 'partner' | 'mine') {
-  $('#code').textContent = pairingCode(config!.server, secretBytes, config!.mode, kind === 'mine' ? config!.person : undefined);
+  const { server, mode, person } = config!;
+  $('#code').textContent = formatPairingCode({ server, secret: b64(secretBytes), mode, ...(kind === 'mine' ? { person } : {}) });
   $('#code-for').textContent = kind === 'mine'
     ? '내 다른 PC에서 "코드로 참여하기"에 넣는 코드예요. 상대에게 주면 상대가 나로 들어와요.'
     : '상대에게 줄 코드예요. 내 다른 PC에는 설정의 "내 다른 PC용 코드"를 쓰세요.';
