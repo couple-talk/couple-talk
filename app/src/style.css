@@ -25,7 +25,7 @@ button.soft, button.link, button.icon { background: none; color: var(--muted); b
 button.soft { background: var(--theirs); color: var(--fg); }
 button.link { padding: 3px 8px; }
 button.icon { padding: 4px 6px; font-size: 18px; line-height: 1; }
-button.link:hover, button.icon:hover { background: var(--theirs); filter: none; }
+button.link:not(:disabled):hover, button.icon:not(:disabled):hover { background: var(--theirs); filter: none; }
 input { font: inherit; padding: 8px 12px; border: 1px solid var(--theirs); border-radius: 12px; background: var(--card); color: var(--fg); width: 100%; transition: border-color .15s; }
 input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
 input[type=radio], input[type=checkbox] { width: auto; }
