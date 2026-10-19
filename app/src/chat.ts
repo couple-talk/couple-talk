@@ -1,6 +1,7 @@
 // The unlocked room: connection, history, rendering and sending.
 import { deriveRoom, open, randomId, receiptOf, seal, type Bytes, type Room } from './crypto';
 import { applyCharacter, wanted } from './characters';
+import { imageElement, keepFile } from './images';
 import { connect, type Item } from './net';
 import type { Who } from './pack';
 import { connected, looking, receiveSignal, rendered, startPresence } from './presence';
@@ -73,10 +74,12 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   const time = new Date(p.at ?? it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const row = document.createElement('div');
 
-  if (p.type === 'chat') {
+  if (p.type === 'chat' || p.type === 'image') {
     row.className = `msg ${mine ? 'mine' : 'theirs'}`;
-    row.innerHTML = '<span class="bubble"></span><span class="time"></span>';
-    row.querySelector('.bubble')!.textContent = p.text;
+    const body = p.type === 'chat' ? Object.assign(document.createElement('span'), { className: 'bubble', textContent: p.text }) : imageElement(p);
+    row.append(body, Object.assign(document.createElement('span'), { className: 'time' }));
+    // A local-room photo lives on the relay only until this PC has stored it, so take it now even if it isn't shown yet.
+    if (p.type === 'image' && !mine && config!.mode === 'local') keepFile(p.file);
     rendered(it.id, mine, live, mine ? row : undefined);
   } else {
     rendered(it.id, mine, live);
@@ -105,10 +108,12 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   list.scrollTop = list.scrollHeight;
   // Chat text only travels to this app's own pet windows (a local Tauri event, never the network).
   if (live && p.type === 'action') petEmit({ type: 'action', kind: p.kind, from: mine ? 'me' : 'partner' });
-  else if (live && p.type === 'chat') {
-    petEmit({ type: 'chat', from: mine ? 'me' : 'partner', ...(config!.hidePetText ? {} : { text: p.text }) });
+  else if (live && (p.type === 'chat' || p.type === 'image')) {
+    // A photo only reaches the pet and the notification as a word; the pixels stay in this window.
+    const text = p.type === 'chat' ? p.text : p.sticker ? '🎭 스티커' : '📷 사진';
+    petEmit({ type: 'chat', from: mine ? 'me' : 'partner', ...(config!.hidePetText ? {} : { text }) });
     // Text goes into the OS notification only when opted in; it can sit on a screen a neighbour sees.
-    if (!mine && !looking()) notify(config!.notifyText ? p.text : undefined);
+    if (!mine && !looking()) notify(config!.notifyText ? text : undefined);
   }
   return p;
 }

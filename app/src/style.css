@@ -51,6 +51,17 @@ fieldset { border: 1px solid var(--theirs); border-radius: 8px; }
 #actions button { font-size: 16px; }
 #send-form { display: flex; gap: 6px; }
 #send-form button { flex: none; }
+#send-form .icon { background: none; padding: 4px 2px; font-size: 18px; }
+/* Photos (#10): the box is sized from the message so history doesn't jump when pixels arrive. */
+.photo { margin: 0; max-width: 100%; border-radius: 12px; overflow: hidden; background: var(--theirs); position: relative; cursor: pointer; }
+.photo.sticker { background: none; }
+.photo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.photo figcaption { position: absolute; inset: 0; display: grid; place-items: center; padding: 8px; text-align: center; font-size: 12px; color: var(--muted); }
+.stickers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; max-height: 320px; overflow-y: auto; }
+.stickers button { background: var(--theirs); color: var(--muted); padding: 4px; display: grid; justify-items: center; font-size: 11px; }
+.stickers img { width: 64px; height: 64px; object-fit: contain; }
+#image-dialog { max-width: 92vw; padding: 8px; }
+#image-full { display: block; max-width: 88vw; max-height: 80vh; margin: 0 auto 8px; }
 footer { font-size: 11px; color: var(--muted); }
 dialog { border: 0; border-radius: 12px; max-width: 420px; background: var(--card); color: var(--fg); }
 dialog h2 { font-size: 15px; margin: 0 0 8px; }
