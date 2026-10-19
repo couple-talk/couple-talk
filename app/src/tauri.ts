@@ -60,6 +60,6 @@ export async function setupMainWindow() {
 }
 
 export async function quitApp() {
-  const { getAllWindows } = await import('@tauri-apps/api/window');
-  for (const w of await getAllWindows()) await w.destroy();
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('quit');
 }
