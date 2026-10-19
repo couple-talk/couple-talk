@@ -19,10 +19,11 @@ body { margin: 0; height: 100vh; }
 button { font: inherit; cursor: pointer; border: 0; border-radius: 8px; padding: 6px 12px; background: var(--accent); color: #fff; }
 button.link { background: none; color: var(--muted); padding: 2px 6px; }
 input { font: inherit; padding: 6px 8px; border: 1px solid var(--theirs); border-radius: 8px; background: var(--card); color: var(--fg); width: 100%; }
-input[type=radio] { width: auto; }
+input[type=radio], input[type=checkbox] { width: auto; }
 label { display: block; margin: 8px 0; }
 fieldset { border: 1px solid var(--theirs); border-radius: 8px; }
 .error { color: var(--accent); min-height: 1em; margin: 4px 0; }
+.error.ok { color: #3cb371; }
 .hint { color: var(--muted); }
 
 .screen { padding: 16px; max-width: 480px; margin: 0 auto; }
@@ -34,21 +35,39 @@ fieldset { border: 1px solid var(--theirs); border-radius: 8px; }
 #partner { flex: 1; font-weight: 600; }
 #conn { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 #conn.on { background: #3cb371; }
+#presence { font-size: 12px; color: var(--muted); }
+#presence.on::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; background: #3cb371; }
 #messages { flex: 1; overflow-y: auto; padding: 8px 0; display: flex; flex-direction: column; gap: 4px; }
 .msg { display: flex; align-items: flex-end; gap: 4px; max-width: 80%; }
 .msg.mine { align-self: flex-end; flex-direction: row-reverse; }
 .bubble { padding: 6px 10px; border-radius: 12px; background: var(--theirs); white-space: pre-wrap; word-break: break-word; }
 .mine .bubble { background: var(--accent); color: #fff; }
 .time { font-size: 11px; color: var(--muted); }
+.read { font-size: 11px; color: var(--muted); }
+.read.unread { color: var(--accent); font-weight: 600; }
 .event { align-self: center; font-size: 12px; color: var(--muted); }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
 .chips button { background: var(--theirs); color: var(--fg); padding: 4px 8px; font-size: 12px; }
 #actions button { font-size: 16px; }
 #send-form { display: flex; gap: 6px; }
 #send-form button { flex: none; }
+#send-form .icon { background: none; padding: 4px 2px; font-size: 18px; }
+/* Photos (#10): the box is sized from the message so history doesn't jump when pixels arrive. */
+.photo { margin: 0; max-width: 100%; border-radius: 12px; overflow: hidden; background: var(--theirs); position: relative; cursor: pointer; }
+.photo.sticker { background: none; }
+.photo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.photo figcaption { position: absolute; inset: 0; display: grid; place-items: center; padding: 8px; text-align: center; font-size: 12px; color: var(--muted); }
+.stickers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; max-height: 320px; overflow-y: auto; }
+.stickers button { background: var(--theirs); color: var(--muted); padding: 4px; display: grid; justify-items: center; font-size: 11px; }
+.stickers img { width: 64px; height: 64px; object-fit: contain; }
+#image-dialog { max-width: 92vw; padding: 8px; }
+#image-full { display: block; max-width: 88vw; max-height: 80vh; margin: 0 auto 8px; }
 footer { font-size: 11px; color: var(--muted); }
 dialog { border: 0; border-radius: 12px; max-width: 420px; background: var(--card); color: var(--fg); }
-#char-dialog h2 { font-size: 15px; margin: 0 0 8px; }
+dialog h2 { font-size: 15px; margin: 0 0 8px; }
+dialog h3 { font-size: 14px; margin: 12px 0 0; }
+.row { display: flex; gap: 6px; align-items: center; margin-top: 12px; }
+.row .link { margin-left: auto; }
 #char-list { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; }
 #char-list li { display: flex; align-items: center; }
 #char-list .chip { background: var(--theirs); color: var(--fg); }

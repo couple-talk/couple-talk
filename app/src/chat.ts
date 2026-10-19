@@ -1,11 +1,13 @@
 // The unlocked room: connection, history, rendering and sending.
 import { deriveRoom, open, randomId, receiptOf, seal, type Bytes, type Room } from './crypto';
 import { applyCharacter, wanted } from './characters';
+import { imageElement, keepFile } from './images';
 import { connect, type Item } from './net';
 import type { Who } from './pack';
+import { connected, looking, receiveSignal, rendered, startPresence } from './presence';
 import { ACTIONS, isValid, STATUSES, type Mode, type Payload } from './protocol';
-import { $, config, load, save, show } from './state';
-import { petEmit, petListen } from './tauri';
+import { $, config, isMe, load, save, show } from './state';
+import { notify, petEmit, petListen } from './tauri';
 
 // ponytail: localStorage caps around 5MB; move local history to IndexedDB if couples hit it.
 const LOCAL_HISTORY_MAX = 5000;
@@ -24,6 +26,7 @@ export async function start(secret: Bytes) {
   show('chat');
   $('#me').textContent = config!.nick;
   const local = load<Item[]>('ct.history', []);
+  startPresence();
   if (config!.mode === 'local') for (const it of local) await render(it, false);
 
   net = connect(config!.server, { roomId: room.roomId, token: room.token, device: config!.device, mode: config!.mode }, () => lastId, {
@@ -34,8 +37,10 @@ export async function start(secret: Bytes) {
     onReady: async (mode, items) => {
       for (const it of items) await receive(it, false, mode);
       for (const who of ['me', 'partner'] as const) { const w = wanted[who]; if (w) applyCharacter(who, w.pack, w.id); }
+      connected();
     },
     onMsg: (it) => receive(it, true, config!.mode),
+    onSignal: receiveSignal,
   });
 }
 
@@ -47,7 +52,7 @@ async function receive(it: Item, live: boolean, mode: Mode) {
     save('ct.history', hist.slice(-LOCAL_HISTORY_MAX));
   }
   const p = await render(it, live);
-  if (mode === 'local' && p?.n && p.from !== config!.nick) net.ack(it.id, p.n);
+  if (mode === 'local' && p?.n && !isMe(p.from)) net.ack(it.id, p.n);
 }
 
 /** Returns the payload (even for a replayed copy, so it can still be acked) or null if unreadable. */
@@ -63,17 +68,21 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
     if (seenNonces.has(p.n)) return p;
     seenNonces.add(p.n);
   }
-  const mine = p.from === config!.nick;
+  const mine = isMe(p.from);
   // The partner's pet appears (with this name) once we've heard from them.
   if (!mine && load<string | null>('ct.partner', null) !== p.from) { save('ct.partner', p.from); petEmit({ type: 'reload' }); }
   const time = new Date(p.at ?? it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const row = document.createElement('div');
 
-  if (p.type === 'chat') {
+  if (p.type === 'chat' || p.type === 'image') {
     row.className = `msg ${mine ? 'mine' : 'theirs'}`;
-    row.innerHTML = '<span class="bubble"></span><span class="time"></span>';
-    row.querySelector('.bubble')!.textContent = p.text;
+    const body = p.type === 'chat' ? Object.assign(document.createElement('span'), { className: 'bubble', textContent: p.text }) : imageElement(p);
+    row.append(body, Object.assign(document.createElement('span'), { className: 'time' }));
+    // A local-room photo lives on the relay only until this PC has stored it, so take it now even if it isn't shown yet.
+    if (p.type === 'image' && !mine && config!.mode === 'local') keepFile(p.file);
+    rendered(it.id, mine, live, mine ? row : undefined);
   } else {
+    rendered(it.id, mine, live);
     row.className = 'event';
     row.innerHTML = '<span class="text"></span> <span class="time"></span>';
     row.querySelector('.text')!.textContent = p.type === 'status'
@@ -99,8 +108,13 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   list.scrollTop = list.scrollHeight;
   // Chat text only travels to this app's own pet windows (a local Tauri event, never the network).
   if (live && p.type === 'action') petEmit({ type: 'action', kind: p.kind, from: mine ? 'me' : 'partner' });
-  else if (live && p.type === 'chat')
-    petEmit({ type: 'chat', from: mine ? 'me' : 'partner', ...(config!.hidePetText ? {} : { text: p.text }) });
+  else if (live && (p.type === 'chat' || p.type === 'image')) {
+    // A photo only reaches the pet and the notification as a word; the pixels stay in this window.
+    const text = p.type === 'chat' ? p.text : p.sticker ? '🎭 스티커' : '📷 사진';
+    petEmit({ type: 'chat', from: mine ? 'me' : 'partner', ...(config!.hidePetText ? {} : { text }) });
+    // Text goes into the OS notification only when opted in; it can sit on a screen a neighbour sees.
+    if (!mine && !looking()) notify(config!.notifyText ? text : undefined);
+  }
   return p;
 }
 

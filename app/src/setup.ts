@@ -1,4 +1,4 @@
-// First-run pairing, unlock and reset.
+// First-run pairing, unlock and reset. settings.ts reuses the helpers exported here.
 import { b64, randomId, unb64, unwrapSecret, wrapSecret, type Bytes } from './crypto';
 import { secretBytes, start } from './chat';
 import type { Mode } from './protocol';
@@ -23,7 +23,7 @@ async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: stri
   await start(secret);
 }
 
-async function loadDeviceKey(create: boolean) {
+export async function loadDeviceKey(create: boolean) {
   try { return (await deviceKey(create)) ?? undefined; } catch (e) {
     throw new Error(e === 'missing'
       ? '이 PC의 키체인에서 기기 키를 찾을 수 없어요. 아래 "초기화" 후 페어링 코드로 다시 연결해 주세요.'
@@ -31,13 +31,18 @@ async function loadDeviceKey(create: boolean) {
   }
 }
 
-function bindForm(id: string, fn: (f: FormData) => Promise<void>) {
+/** Runs `fn` on submit; a thrown message shows in the form's `.error`, a returned string shows there as a success note. */
+export function bindForm(id: string, fn: (f: FormData) => Promise<void | string>) {
   const form = $<HTMLFormElement>(id);
   form.onsubmit = async (e) => {
     e.preventDefault();
     const err = form.querySelector('.error')!;
     err.textContent = '';
-    try { await fn(new FormData(form)); } catch (ex) { err.textContent = (ex as Error).message; }
+    err.classList.remove('ok');
+    try {
+      const note = await fn(new FormData(form));
+      if (note) { err.textContent = note; err.classList.add('ok'); }
+    } catch (ex) { err.textContent = (ex as Error).message; }
   };
 }
 
@@ -66,18 +71,28 @@ bindForm('#unlock-form', async (f) => {
   await start(secret);
 });
 
-// Native confirm()/alert() aren't reliable in Tauri webviews, so confirm by clicking twice.
-$('#reset').onclick = async (e) => {
-  const b = e.currentTarget as HTMLButtonElement;
-  if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = '정말 지울까요? 한 번 더 누르세요'; return; }
-  localStorage.removeItem('ct.config');
-  localStorage.removeItem('ct.history');
-  localStorage.removeItem('ct.partner');
-  await new Promise((done) => { const r = indexedDB.deleteDatabase('ct-packs'); r.onsuccess = r.onerror = r.onblocked = done; });
-  // Awaited so the pets drop the old name tags and characters before this page navigates away.
-  await petEmit({ type: 'reload' }).catch(() => {});
-  location.reload();
-};
+/**
+ * Wipes this PC. Native confirm()/alert() aren't reliable in Tauri webviews, so confirm by clicking twice.
+ * Returns a disarm function for callers whose button can be hidden (a dialog) between the two clicks.
+ */
+export function bindReset(id: string) {
+  const b = $<HTMLButtonElement>(id);
+  const label = b.textContent;
+  b.onclick = async () => {
+    if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = '정말 지울까요? 한 번 더 누르세요'; return; }
+    localStorage.removeItem('ct.config');
+    localStorage.removeItem('ct.history');
+    localStorage.removeItem('ct.partner');
+    localStorage.removeItem('ct.presence');
+    for (const db of ['ct-packs', 'ct-files'])
+      await new Promise((done) => { const r = indexedDB.deleteDatabase(db); r.onsuccess = r.onerror = r.onblocked = done; });
+    // Awaited so the pets drop the old name tags and characters before this page navigates away.
+    await petEmit({ type: 'reload' }).catch(() => {});
+    location.reload();
+  };
+  return () => { delete b.dataset.armed; b.textContent = label; };
+}
+bindReset('#reset');
 
 function showCode() {
   $('#code').textContent = pairingCode(config!.server, secretBytes, config!.mode);

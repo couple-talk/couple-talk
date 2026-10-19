@@ -30,6 +30,20 @@ export async function petEmit(e: PetEvent) {
   await Promise.all(['pet', 'pet-me'].map((w) => emitTo(w, 'pet', e)));
 }
 
+/** Unread partner messages, shown as a badge on the dock/taskbar and a dot on the tray icon (#5). */
+export async function setUnread(n: number) {
+  if (!isTauri) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('set_unread', { n });
+}
+
+/** OS notification for a new message. Without `text` it only says that one arrived. */
+export async function notify(text?: string) {
+  if (!isTauri) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('notify', { body: text ?? null }).catch(() => {});
+}
+
 /** Called when the pet window starts and asks for the current partner status. */
 export async function petListen(onHello: () => void) {
   if (!isTauri) return;

@@ -49,14 +49,18 @@
       <header>
         <span id="conn" class="off" title="연결 중…"></span>
         <span id="partner">상대 상태 없음</span>
+        <span id="presence"></span>
         <button id="show-chars" class="link">캐릭터</button>
-        <button id="show-code" class="link" title="새 PC나 상대에게 줄 코드">코드</button>
+        <button id="show-settings" class="link">설정</button>
         <button id="quit" class="link">종료</button>
       </header>
       <div id="messages"></div>
       <div id="statuses" class="chips"></div>
       <div id="actions" class="chips"></div>
       <form id="send-form">
+        <button type="button" id="pick-photo" class="icon" title="사진 보내기 (붙여넣기도 돼요)">📷</button>
+        <button type="button" id="pick-sticker" class="icon" title="내 캐릭터 스티커">🎭</button>
+        <input id="photo-file" type="file" accept="image/*" hidden />
         <input id="text" autocomplete="off" placeholder="메시지" />
         <button>보내기</button>
       </form>
@@ -75,6 +79,45 @@
         <button type="button" id="char-default">기본 캐릭터로</button>
         <button>닫기</button>
       </form>
+    </dialog>
+
+    <dialog id="settings-dialog">
+      <h2>설정</h2>
+      <form id="nick-form">
+        <label>내 닉네임 <input name="nick" required maxlength="20" /></label>
+        <button>닉네임 바꾸기</button>
+        <p class="error"></p>
+      </form>
+      <label><input id="hide-pet-text" type="checkbox" /> 말풍선에 내용 숨기기 (캐릭터 위에 💬만 표시)</label>
+      <label><input id="tap-to-view" type="checkbox" /> 사진·스티커는 눌러서 보기 (새로 오는 것부터, 받자마자 펼치지 않음)</label>
+      <label><input id="notify-text" type="checkbox" /> 알림에 메시지 내용 표시 (끄면 "새 메시지가 왔어요"만)</label>
+      <p class="hint" id="shortcut-hint">Ctrl+Shift+H (Mac은 ⌘⇧H)로 창과 캐릭터를 한 번에 숨기고 다시 보여요. 트레이 아이콘에서도 열 수 있어요.</p>
+      <p class="hint">서버: <span id="set-server"></span><br />기록: <span id="set-mode"></span></p>
+      <button type="button" id="show-code" class="link" title="새 PC나 상대에게 줄 코드">페어링 코드 보기</button>
+      <form id="pin-form">
+        <h3>잠금 비밀번호 바꾸기</h3>
+        <label>현재 비밀번호 <input name="old" type="password" required autocomplete="current-password" /></label>
+        <label>새 비밀번호 (8자 이상) <input name="pin" type="password" required minlength="8" autocomplete="new-password" /></label>
+        <button>비밀번호 바꾸기</button>
+        <p class="error"></p>
+      </form>
+      <form method="dialog" class="row">
+        <button type="button" id="lock" title="대화 내용을 화면에서 지우고 잠금 화면으로">잠그기</button>
+        <button type="button" id="settings-reset" class="link">이 PC에서 초기화</button>
+        <button>닫기</button>
+      </form>
+    </dialog>
+
+    <dialog id="sticker-dialog">
+      <h2>스티커</h2>
+      <p class="hint">내 캐릭터의 포즈를 보내요. 캐릭터 팩을 바꾸면 스티커도 바뀌어요.</p>
+      <div id="stickers" class="stickers"></div>
+      <form method="dialog"><button>닫기</button></form>
+    </dialog>
+
+    <dialog id="image-dialog">
+      <img id="image-full" alt="사진" />
+      <form method="dialog"><button>닫기</button></form>
     </dialog>
 
     <dialog id="code-dialog">
