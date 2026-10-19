@@ -68,5 +68,9 @@ dialog h2 { font-size: 15px; margin: 0 0 8px; }
 dialog h3 { font-size: 14px; margin: 12px 0 0; }
 .row { display: flex; gap: 6px; align-items: center; margin-top: 12px; }
 .row .link { margin-left: auto; }
+#char-list { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; }
+#char-list li { display: flex; align-items: center; }
+#char-list .chip { background: var(--theirs); color: var(--fg); }
+#char-list .chip.on { background: var(--accent); color: #fff; }
 #char-report { padding-left: 0; list-style: none; font-size: 12px; max-height: 160px; overflow-y: auto; }
 #code { display: block; word-break: break-all; background: var(--theirs); padding: 8px; border-radius: 8px; margin: 8px 0; user-select: all; }
