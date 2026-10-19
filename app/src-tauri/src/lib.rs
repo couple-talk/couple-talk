@@ -153,15 +153,15 @@ fn set_unread(app: AppHandle, n: i64) {
     }
 }
 
-/// OS notification for a new message. Without `body` only "새 메시지가 왔어요" is shown, which is the default:
-/// the text may be on a screen someone else can see. While everything is hidden with the shortcut nothing is
-/// shown at all (that is what the shortcut is for); the badge still counts.
 /// Same as the tray's 종료. Destroying the windows from JS stops at the main window: the page running the loop goes with it.
 #[tauri::command]
 fn quit(app: AppHandle) {
     app.exit(0);
 }
 
+/// OS notification for a new message. Without `body` only "새 메시지가 왔어요" is shown, which is the default:
+/// the text may be on a screen someone else can see. While everything is hidden with the shortcut nothing is
+/// shown at all (that is what the shortcut is for); the badge still counts.
 #[tauri::command]
 fn notify(app: AppHandle, body: Option<String>) -> Result<(), String> {
     if with_vis(&app, |v| v.stealth) {
