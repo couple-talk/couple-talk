@@ -3,13 +3,14 @@ import { unwrapSecret, wrapSecret } from './crypto';
 import { secretBytes } from './chat';
 import { bindForm, bindReset, loadDeviceKey } from './setup';
 import { $, config, load, setConfig } from './state';
-import { petEmit } from './tauri';
+import { isTauri, petEmit } from './tauri';
 
 const dialog = $<HTMLDialogElement>('#settings-dialog');
 
 $('#show-settings').onclick = () => {
   $<HTMLInputElement>('#nick-form [name=nick]').value = config!.nick;
   $<HTMLInputElement>('#hide-pet-text').checked = !!config!.hidePetText;
+  $<HTMLInputElement>('#notify-text').checked = !!config!.notifyText;
   $('#set-server').textContent = config!.server;
   $('#set-mode').textContent = config!.mode === 'server' ? '서버 (암호문 보관)' : '각자 PC에만';
   dialog.querySelectorAll('.error').forEach((e) => (e.textContent = ''));
@@ -31,6 +32,9 @@ bindForm('#nick-form', async (f) => {
 });
 
 $<HTMLInputElement>('#hide-pet-text').onchange = (e) => setConfig({ ...config!, hidePetText: (e.currentTarget as HTMLInputElement).checked });
+$<HTMLInputElement>('#notify-text').onchange = (e) => setConfig({ ...config!, notifyText: (e.currentTarget as HTMLInputElement).checked });
+// Notifications, the tray and the shortcut only exist in the desktop app.
+$('#notify-text').closest('label')!.hidden = $('#shortcut-hint').hidden = !isTauri;
 
 bindForm('#pin-form', async (f) => {
   const pin = String(f.get('pin'));

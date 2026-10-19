@@ -3,10 +3,10 @@ import { deriveRoom, open, randomId, receiptOf, seal, type Bytes, type Room } fr
 import { applyCharacter, wanted } from './characters';
 import { connect, type Item } from './net';
 import type { Who } from './pack';
-import { connected, receiveSignal, rendered, startPresence } from './presence';
+import { connected, looking, receiveSignal, rendered, startPresence } from './presence';
 import { ACTIONS, isValid, STATUSES, type Mode, type Payload } from './protocol';
 import { $, config, isMe, load, save, show } from './state';
-import { petEmit, petListen } from './tauri';
+import { notify, petEmit, petListen } from './tauri';
 
 // ponytail: localStorage caps around 5MB; move local history to IndexedDB if couples hit it.
 const LOCAL_HISTORY_MAX = 5000;
@@ -105,8 +105,11 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   list.scrollTop = list.scrollHeight;
   // Chat text only travels to this app's own pet windows (a local Tauri event, never the network).
   if (live && p.type === 'action') petEmit({ type: 'action', kind: p.kind, from: mine ? 'me' : 'partner' });
-  else if (live && p.type === 'chat')
+  else if (live && p.type === 'chat') {
     petEmit({ type: 'chat', from: mine ? 'me' : 'partner', ...(config!.hidePetText ? {} : { text: p.text }) });
+    // Text goes into the OS notification only when opted in; it can sit on a screen a neighbour sees.
+    if (!mine && !looking()) notify(config!.notifyText ? p.text : undefined);
+  }
   return p;
 }
 
