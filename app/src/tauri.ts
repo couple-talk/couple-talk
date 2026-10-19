@@ -58,8 +58,3 @@ export async function setupMainWindow() {
   const win = getCurrentWindow();
   await win.onCloseRequested((e) => { e.preventDefault(); win.hide(); });
 }
-
-export async function quitApp() {
-  const { invoke } = await import('@tauri-apps/api/core');
-  await invoke('quit');
-}
