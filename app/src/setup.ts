@@ -1,4 +1,4 @@
-// First-run pairing, unlock and reset.
+// First-run pairing, unlock and reset. settings.ts reuses the helpers exported here.
 import { b64, randomId, unb64, unwrapSecret, wrapSecret, type Bytes } from './crypto';
 import { secretBytes, start } from './chat';
 import type { Mode } from './protocol';
@@ -23,7 +23,7 @@ async function finishSetup(server: string, secret: Bytes, mode: Mode, nick: stri
   await start(secret);
 }
 
-async function loadDeviceKey(create: boolean) {
+export async function loadDeviceKey(create: boolean) {
   try { return (await deviceKey(create)) ?? undefined; } catch (e) {
     throw new Error(e === 'missing'
       ? '이 PC의 키체인에서 기기 키를 찾을 수 없어요. 아래 "초기화" 후 페어링 코드로 다시 연결해 주세요.'
@@ -31,7 +31,7 @@ async function loadDeviceKey(create: boolean) {
   }
 }
 
-function bindForm(id: string, fn: (f: FormData) => Promise<void>) {
+export function bindForm(id: string, fn: (f: FormData) => Promise<void>) {
   const form = $<HTMLFormElement>(id);
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -66,18 +66,21 @@ bindForm('#unlock-form', async (f) => {
   await start(secret);
 });
 
-// Native confirm()/alert() aren't reliable in Tauri webviews, so confirm by clicking twice.
-$('#reset').onclick = async (e) => {
-  const b = e.currentTarget as HTMLButtonElement;
-  if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = '정말 지울까요? 한 번 더 누르세요'; return; }
-  localStorage.removeItem('ct.config');
-  localStorage.removeItem('ct.history');
-  localStorage.removeItem('ct.partner');
-  await new Promise((done) => { const r = indexedDB.deleteDatabase('ct-packs'); r.onsuccess = r.onerror = r.onblocked = done; });
-  // Awaited so the pets drop the old name tags and characters before this page navigates away.
-  await petEmit({ type: 'reload' }).catch(() => {});
-  location.reload();
-};
+/** Wipes this PC. Native confirm()/alert() aren't reliable in Tauri webviews, so confirm by clicking twice. */
+export function bindReset(id: string) {
+  $(id).onclick = async (e) => {
+    const b = e.currentTarget as HTMLButtonElement;
+    if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = '정말 지울까요? 한 번 더 누르세요'; return; }
+    localStorage.removeItem('ct.config');
+    localStorage.removeItem('ct.history');
+    localStorage.removeItem('ct.partner');
+    await new Promise((done) => { const r = indexedDB.deleteDatabase('ct-packs'); r.onsuccess = r.onerror = r.onblocked = done; });
+    // Awaited so the pets drop the old name tags and characters before this page navigates away.
+    await petEmit({ type: 'reload' }).catch(() => {});
+    location.reload();
+  };
+}
+bindReset('#reset');
 
 function showCode() {
   $('#code').textContent = pairingCode(config!.server, secretBytes, config!.mode);

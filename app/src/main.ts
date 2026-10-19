@@ -3,6 +3,7 @@ import './style.css';
 import './setup';
 import './chat';
 import './characters';
+import './settings';
 import { $, config, show } from './state';
 import { isTauri, quitApp, setupMainWindow } from './tauri';
 

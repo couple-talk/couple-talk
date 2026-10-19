@@ -19,7 +19,7 @@ body { margin: 0; height: 100vh; }
 button { font: inherit; cursor: pointer; border: 0; border-radius: 8px; padding: 6px 12px; background: var(--accent); color: #fff; }
 button.link { background: none; color: var(--muted); padding: 2px 6px; }
 input { font: inherit; padding: 6px 8px; border: 1px solid var(--theirs); border-radius: 8px; background: var(--card); color: var(--fg); width: 100%; }
-input[type=radio] { width: auto; }
+input[type=radio], input[type=checkbox] { width: auto; }
 label { display: block; margin: 8px 0; }
 fieldset { border: 1px solid var(--theirs); border-radius: 8px; }
 .error { color: var(--accent); min-height: 1em; margin: 4px 0; }
@@ -48,6 +48,9 @@ fieldset { border: 1px solid var(--theirs); border-radius: 8px; }
 #send-form button { flex: none; }
 footer { font-size: 11px; color: var(--muted); }
 dialog { border: 0; border-radius: 12px; max-width: 420px; background: var(--card); color: var(--fg); }
-#char-dialog h2 { font-size: 15px; margin: 0 0 8px; }
+dialog h2 { font-size: 15px; margin: 0 0 8px; }
+dialog h3 { font-size: 14px; margin: 12px 0 0; }
+.row { display: flex; gap: 6px; align-items: center; margin-top: 12px; }
+.row .link { margin-left: auto; }
 #char-report { padding-left: 0; list-style: none; font-size: 12px; max-height: 160px; overflow-y: auto; }
 #code { display: block; word-break: break-all; background: var(--theirs); padding: 8px; border-radius: 8px; margin: 8px 0; user-select: all; }
