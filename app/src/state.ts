@@ -3,7 +3,11 @@ import type { Mode } from './protocol';
 
 // hidePetText: show only 💬 over the pet instead of the message (set from the settings screen, #4).
 // pastNicks: names I used before a rename, so my old messages still count as mine until #7 keys people by id.
-export type Config = { server: string; wrapped: string; peppered: boolean; nick: string; mode: Mode; device: string; hidePetText?: boolean; pastNicks?: string[] };
+// notifyText: put the message text in OS notifications; off by default since they may show on a shared screen (#5).
+export type Config = {
+  server: string; wrapped: string; peppered: boolean; nick: string; mode: Mode; device: string;
+  hidePetText?: boolean; pastNicks?: string[]; notifyText?: boolean;
+};
 
 export const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 export const show = (id: string) => document.querySelectorAll<HTMLElement>('.screen').forEach((s) => (s.hidden = s.id !== id));

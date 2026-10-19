@@ -3,6 +3,7 @@ import { open, seal } from './crypto';
 import { net, room } from './chat';
 import { isSignal, type Signal } from './protocol';
 import { $, config, isMe, load, save } from './state';
+import { setUnread } from './tauri';
 
 const BEAT_MS = 10_000;
 // A beat or two can go missing on a slow network; past this the partner counts as gone (#3: offline within 30s).
@@ -13,8 +14,9 @@ let partner = load<{ seen: number; read: number }>('ct.presence', { seen: 0, rea
 let newest = 0; // newest message id rendered, so a partner can't mark messages that don't exist yet as read
 let newestTheirs = 0;
 let myRead = 0; // what I last reported
+let unread = 0; // live partner messages that arrived while I wasn't looking (badge, #5)
 
-const looking = () => document.visibilityState === 'visible' && document.hasFocus();
+export const looking = () => document.visibilityState === 'visible' && document.hasFocus();
 
 /** Sends my heartbeat. Does nothing until connected to a relay that relays signals. */
 async function beat() {
@@ -26,9 +28,11 @@ async function beat() {
   net.signal(await seal(room.key, s));
 }
 
-/** Signals right away when something new became read instead of waiting for the next beat. */
+/** Signals right away when something new became read instead of waiting for the next beat, and clears the badge. */
 function markRead() {
-  if (looking() && newestTheirs > myRead) beat();
+  if (!looking()) return;
+  if (unread) { unread = 0; setUnread(0); }
+  if (newestTheirs > myRead) beat();
 }
 
 function paint(row: HTMLElement) {
@@ -43,7 +47,11 @@ function paint(row: HTMLElement) {
 export function rendered(id: number, mine: boolean, live: boolean, row?: HTMLElement) {
   newest = Math.max(newest, id);
   // History is marked once in connected(), not with a signal per replayed message.
-  if (!mine) { newestTheirs = Math.max(newestTheirs, id); if (live) markRead(); }
+  if (!mine) {
+    newestTheirs = Math.max(newestTheirs, id);
+    if (live && looking()) markRead();
+    else if (live) setUnread(++unread);
+  }
   if (!row) return;
   row.dataset.id = String(id);
   row.append(Object.assign(document.createElement('span'), { className: 'read' }));

@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import { emit, emitTo } from '@tauri-apps/api/event';
 import { currentMonitor, getCurrentWindow, LogicalPosition, LogicalSize, Window, type Monitor } from '@tauri-apps/api/window';
 import { loadPack, type Who } from './pack';
@@ -35,13 +36,19 @@ preload();
 // The partner's window stays hidden until we know there is a partner (their first message).
 const stored = (k: string) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null'); } catch { return null; } };
 let shown = true; // windows start visible (tauri.conf.json)
+// The tray menu and the hide-all shortcut (#5) can hide both pets; the main process says so.
+let allowed = true;
 async function showIdentity() {
   const name: string | null = who === 'me' ? stored('ct.config')?.nick ?? null : stored('ct.partner');
   document.getElementById('tag')!.textContent = name ?? (who === 'me' ? '나' : '');
   body.style.filter = who === 'partner' && builtin ? 'hue-rotate(190deg)' : '';
+  const want = allowed && (who === 'me' || !!name);
   // show() can take focus on macOS, so only toggle on an actual change.
-  if (who === 'partner' && shown !== !!name) { shown = !!name; await (shown ? win.show() : win.hide()); }
+  if (shown !== want) { shown = want; await (shown ? win.show() : win.hide()); }
 }
+// Listen first, then ask for the current state, so a change in between isn't missed.
+await win.listen<boolean>('pets-visible', async ({ payload }) => { allowed = payload; await showIdentity(); });
+allowed = await invoke('pets_visible');
 await showIdentity();
 
 let pose = '';
