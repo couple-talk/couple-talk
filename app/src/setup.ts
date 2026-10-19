@@ -31,13 +31,18 @@ export async function loadDeviceKey(create: boolean) {
   }
 }
 
-export function bindForm(id: string, fn: (f: FormData) => Promise<void>) {
+/** Runs `fn` on submit; a thrown message shows in the form's `.error`, a returned string shows there as a success note. */
+export function bindForm(id: string, fn: (f: FormData) => Promise<void | string>) {
   const form = $<HTMLFormElement>(id);
   form.onsubmit = async (e) => {
     e.preventDefault();
     const err = form.querySelector('.error')!;
     err.textContent = '';
-    try { await fn(new FormData(form)); } catch (ex) { err.textContent = (ex as Error).message; }
+    err.classList.remove('ok');
+    try {
+      const note = await fn(new FormData(form));
+      if (note) { err.textContent = note; err.classList.add('ok'); }
+    } catch (ex) { err.textContent = (ex as Error).message; }
   };
 }
 
@@ -66,10 +71,14 @@ bindForm('#unlock-form', async (f) => {
   await start(secret);
 });
 
-/** Wipes this PC. Native confirm()/alert() aren't reliable in Tauri webviews, so confirm by clicking twice. */
+/**
+ * Wipes this PC. Native confirm()/alert() aren't reliable in Tauri webviews, so confirm by clicking twice.
+ * Returns a disarm function for callers whose button can be hidden (a dialog) between the two clicks.
+ */
 export function bindReset(id: string) {
-  $(id).onclick = async (e) => {
-    const b = e.currentTarget as HTMLButtonElement;
+  const b = $<HTMLButtonElement>(id);
+  const label = b.textContent;
+  b.onclick = async () => {
     if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = '정말 지울까요? 한 번 더 누르세요'; return; }
     localStorage.removeItem('ct.config');
     localStorage.removeItem('ct.history');
@@ -80,6 +89,7 @@ export function bindReset(id: string) {
     await petEmit({ type: 'reload' }).catch(() => {});
     location.reload();
   };
+  return () => { delete b.dataset.armed; b.textContent = label; };
 }
 bindReset('#reset');
 

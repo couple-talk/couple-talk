@@ -23,6 +23,7 @@ input[type=radio], input[type=checkbox] { width: auto; }
 label { display: block; margin: 8px 0; }
 fieldset { border: 1px solid var(--theirs); border-radius: 8px; }
 .error { color: var(--accent); min-height: 1em; margin: 4px 0; }
+.error.ok { color: #3cb371; }
 .hint { color: var(--muted); }
 
 .screen { padding: 16px; max-width: 480px; margin: 0 auto; }

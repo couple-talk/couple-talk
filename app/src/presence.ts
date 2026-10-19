@@ -2,7 +2,7 @@
 import { open, seal } from './crypto';
 import { net, room } from './chat';
 import { isSignal, type Signal } from './protocol';
-import { $, config, load, save } from './state';
+import { $, config, isMe, load, save } from './state';
 
 const BEAT_MS = 10_000;
 // A beat or two can go missing on a slow network; past this the partner counts as gone (#3: offline within 30s).
@@ -53,7 +53,7 @@ export function rendered(id: number, mine: boolean, live: boolean, row?: HTMLEle
 export async function receiveSignal(blob: string) {
   let s: unknown;
   try { s = await open(room.key, blob); } catch { return; }
-  if (!isSignal(s) || s.from === config!.nick) return;
+  if (!isSignal(s) || isMe(s.from)) return;
   const before = partner;
   partner = { seen: Date.now(), read: Math.max(partner.read, Math.min(s.read, newest)) };
   save('ct.presence', partner);
