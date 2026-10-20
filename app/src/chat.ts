@@ -5,7 +5,7 @@ import { imageElement, keepFile } from './images';
 import { connect, type Item } from './net';
 import type { Who } from './pack';
 import { connected, looking, receiveSignal, rendered, startPresence } from './presence';
-import { ACTIONS, isValid, STATUSES, type Mode, type Payload } from './protocol';
+import { ACTIONS, isValid, type Mode, type Payload } from './protocol';
 import { $, config, isMe, load, save, setConfig, show } from './state';
 import { notify, petEmit, petListen } from './tauri';
 
@@ -134,12 +134,6 @@ $<HTMLFormElement>('#send-form').onsubmit = async (e) => {
   if (await sendPayload({ type: 'chat', text: input.value })) input.value = '';
 };
 
-$('#statuses').append(...STATUSES.map(([emoji, text]) => {
-  const b = document.createElement('button');
-  b.textContent = `${emoji} ${text}`;
-  b.onclick = () => sendPayload({ type: 'status', emoji, text });
-  return b;
-}));
 $('#actions').append(...Object.entries(ACTIONS).map(([kind, [emoji, label]]) => {
   const b = document.createElement('button');
   b.textContent = emoji;

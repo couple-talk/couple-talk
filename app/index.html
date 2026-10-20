@@ -107,6 +107,18 @@
       </form>
     </dialog>
 
+    <dialog id="status-dialog">
+      <h2>상태 만들기</h2>
+      <form id="status-form">
+        <label>이모지 <input name="emoji" required maxlength="16" placeholder="Win+. 또는 ⌃⌘Space로 이모지 창" /></label>
+        <label>문구 <input name="text" required maxlength="20" placeholder="예: 외근 중" /></label>
+        <button>저장하고 보내기</button>
+        <p class="error"></p>
+      </form>
+      <p class="hint">만든 상태는 이 PC에 저장돼요. 칩을 우클릭하면 지워져요.</p>
+      <form method="dialog"><button class="soft">닫기</button></form>
+    </dialog>
+
     <dialog id="sticker-dialog">
       <h2>스티커</h2>
       <p class="hint">내 캐릭터의 포즈를 보내요. 캐릭터 팩을 바꾸면 스티커도 바뀌어요.</p>
