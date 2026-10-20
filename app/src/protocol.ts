@@ -20,7 +20,7 @@ const personOk = (p: unknown) => p === undefined || (typeof p === 'string' && PE
 
 // The partner's code joins as a new person; the code for my own other PC also carries my person id (#7) and
 // every nickname I've used, so that PC still counts my messages without an id (pre-#7, older apps) as mine.
-// Older apps read only the first three fields, so they can still join with either.
+// Apps before #7 read only the first three fields, so they can still join with either.
 export type PairingCode = { server: string; secret: string; mode: Mode; person?: string; nicks?: string[] };
 const NICK_MAX = 20; // the inputs' maxlength
 // Keeps the code pasteable. The list is [current, oldest, …], so a cut drops recent past names, which only
