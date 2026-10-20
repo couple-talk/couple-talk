@@ -79,6 +79,8 @@ dialog { border: 0; border-radius: 16px; padding: 16px; max-width: 420px; backgr
 dialog::backdrop { background: rgba(43, 33, 36, .3); }
 dialog h2 { font-size: 15px; margin: 0 0 8px; }
 dialog h3 { font-size: 14px; margin: 12px 0 0; }
+.poses { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; color: var(--muted); }
+.poses label { display: inline; margin: 0; }
 .row { display: flex; gap: 6px; align-items: center; margin-top: 12px; }
 .row .link { margin-left: auto; }
 #char-list { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; }

@@ -7,7 +7,7 @@ import type { Who } from './pack';
 import { connected, looking, receiveSignal, rendered, startPresence } from './presence';
 import { ACTIONS, isValid, type Mode, type Payload } from './protocol';
 import { $, config, isMe, load, save, setConfig, show } from './state';
-import { notify, petEmit, petListen } from './tauri';
+import { notify, petEmit, petListen, type PetEvent } from './tauri';
 
 // ponytail: localStorage caps around 5MB; move local history to IndexedDB if couples hit it.
 const LOCAL_HISTORY_MAX = 5000;
@@ -15,7 +15,7 @@ const LOCAL_HISTORY_MAX = 5000;
 export let room: Room;
 export let secretBytes: Bytes;
 let lastId = 0;
-const statuses: Record<Who, string> = { me: '', partner: '' };
+const statuses: Partial<Record<Who, PetEvent>> = {}; // the latest status per side, replayed to a pet window that starts later
 const seen = new Set<number>();
 const seenNonces = new Set<string>();
 export let net: ReturnType<typeof connect>;
@@ -99,9 +99,9 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
       else if ((wanted[who]?.id ?? -1) < it.id) wanted[who] = { id: it.id, pack: p.pack };
     }
     if (p.type === 'status') {
-      statuses[mine ? 'me' : 'partner'] = p.emoji;
+      const who = mine ? 'me' : 'partner';
       if (!mine) $('#partner').textContent = `${p.from} ${p.emoji} ${p.text}`;
-      petEmit({ type: 'status', emoji: p.emoji, from: mine ? 'me' : 'partner' });
+      petEmit((statuses[who] = { type: 'status', emoji: p.emoji, pose: p.pose, from: who }));
     }
   }
   row.querySelector('.time')!.textContent = time;
@@ -143,5 +143,5 @@ $('#actions').append(...Object.entries(ACTIONS).map(([kind, [emoji, label]]) => 
 }));
 
 petListen(() => {
-  for (const from of ['me', 'partner'] as const) if (statuses[from]) petEmit({ type: 'status', emoji: statuses[from], from });
+  for (const s of Object.values(statuses)) petEmit(s);
 });

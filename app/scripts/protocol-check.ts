@@ -1,7 +1,7 @@
 // Run: node scripts/protocol-check.ts
 // Payload validation guards rendering against a partner's client (or a tampered history), so it is checked here.
 import assert from 'node:assert/strict';
-import { IMAGE_FILE_MAX, IMAGE_MAX_SIDE, isImageFile, isSignal, isValid, sentBy } from '../src/protocol.ts';
+import { IMAGE_FILE_MAX, IMAGE_MAX_SIDE, isImageFile, isSignal, isValid, sentBy, STATUS_TEXT_MAX } from '../src/protocol.ts';
 
 const hash = 'a'.repeat(43);
 const image = { v: 1, from: 'me', type: 'image', file: hash, w: 1280, h: 960 };
@@ -14,6 +14,14 @@ assert.ok(!isValid({ ...image, w: 1.5 }));
 assert.ok(!isValid({ ...image, sticker: 'yes' }));
 assert.ok(isValid({ v: 1, from: 'me', type: 'chat', text: 'hi' }), 'existing types still pass');
 assert.ok(!isValid({ v: 1, from: 'me', type: 'video', file: hash }), 'unknown types are rejected');
+
+// Made-up statuses (#12): any emoji and phrase within the caps, and only a pack's status poses.
+const status = { v: 1, from: 'me', type: 'status', emoji: '🚌', text: '외근 중' };
+assert.ok(isValid(status));
+assert.ok(isValid({ ...status, pose: 'status_busy' }));
+assert.ok(!isValid({ ...status, pose: 'heart_send' }), 'only status poses, so a status cannot trigger a reaction pose');
+assert.ok(!isValid({ ...status, text: '가'.repeat(STATUS_TEXT_MAX + 1) }));
+assert.ok(!isValid({ ...status, emoji: '🚌'.repeat(10) }));
 
 assert.ok(isImageFile({ mime: 'image/jpeg', data: 'abc' }));
 assert.ok(isImageFile({ mime: 'image/png', data: '' }));

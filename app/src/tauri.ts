@@ -21,7 +21,7 @@ export async function deviceKey(create: boolean): Promise<Uint8Array<ArrayBuffer
 export type PetEvent =
   | { type: 'reload' }
   | { type: 'chat'; from: Who; text?: string }
-  | { type: 'status'; emoji: string; from: Who }
+  | { type: 'status'; emoji: string; pose?: string; from: Who }
   | { type: 'action'; kind: string; from: Who };
 
 export async function petEmit(e: PetEvent) {
