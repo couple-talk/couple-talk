@@ -18,18 +18,30 @@ const HASH_RE = /^[\w-]{43}$/;
 export const PERSON_RE = HASH_RE; // randomId(): 32 bytes base64url
 const personOk = (p: unknown) => p === undefined || (typeof p === 'string' && PERSON_RE.test(p));
 
-// The partner's code joins as a new person; the code for my own other PC also carries my person id (#7).
+// The partner's code joins as a new person; the code for my own other PC also carries my person id (#7) and
+// every nickname I've used, so that PC still counts my messages without an id (pre-#7, older apps) as mine.
 // Older apps read only the first three fields, so they can still join with either.
-export type PairingCode = { server: string; secret: string; mode: Mode; person?: string };
+export type PairingCode = { server: string; secret: string; mode: Mode; person?: string; nicks?: string[] };
+const NICK_MAX = 20; // the inputs' maxlength
 
-export const formatPairingCode = (c: PairingCode) => [c.server, c.secret, c.mode, ...(c.person ? [c.person] : [])].join('#');
+export const formatPairingCode = (c: PairingCode) =>
+  [c.server, c.secret, c.mode, ...(c.person ? [c.person, encodeURIComponent(JSON.stringify(c.nicks ?? []))] : [])].join('#');
+
+function parseNicks(field: string) {
+  try {
+    const a: unknown = JSON.parse(decodeURIComponent(field));
+    return Array.isArray(a) && a.length <= 50 && a.every((n) => typeof n === 'string' && n.trim() && n.length <= NICK_MAX) ? (a as string[]) : null;
+  } catch { return null; }
+}
 
 export function parsePairingCode(code: string): PairingCode | null {
-  const [server, secret, mode, person, ...rest] = code.trim().split('#');
+  const [server, secret, mode, person, names, ...rest] = code.trim().split('#');
   // The secret is always 32 random bytes in base64url, like a person id.
   if (rest.length || !server || !secret || !PERSON_RE.test(secret) || (mode !== 'server' && mode !== 'local')) return null;
   if (person !== undefined && !PERSON_RE.test(person)) return null;
-  return { server, secret, mode, ...(person ? { person } : {}) };
+  const nicks = names === undefined ? undefined : parseNicks(names);
+  if (nicks === null) return null;
+  return { server, secret, mode, ...(person ? { person } : {}), ...(nicks ? { nicks } : {}) };
 }
 
 /** Whether a message or signal is from me. The person id decides when the sender's app sent one; otherwise

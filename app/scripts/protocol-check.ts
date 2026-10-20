@@ -39,10 +39,16 @@ const secret = 's'.repeat(43), partnerCode = { server: 'wss://x', secret, mode: 
 assert.deepEqual(parsePairingCode(`wss://x#${secret}#server`), partnerCode, 'partner code and pre-#7 codes');
 assert.deepEqual(parsePairingCode(`  wss://x#${secret}#local\n`), { ...partnerCode, mode: 'local' });
 assert.deepEqual(parsePairingCode(formatPairingCode(partnerCode)), partnerCode);
-const mine = { ...partnerCode, person: me.person };
-assert.deepEqual(parsePairingCode(formatPairingCode(mine)), mine);
+const mine = { ...partnerCode, person: me.person, nicks: ['곰', '#1 곰돌이', 'a%b'] };
+assert.deepEqual(parsePairingCode(formatPairingCode(mine)), mine, 'nicknames may hold # and %');
+assert.ok(!formatPairingCode(mine).split('#')[4].includes('#'));
+assert.deepEqual(parsePairingCode(`wss://x#${secret}#server#${me.person}`), { ...partnerCode, person: me.person }, 'id without nicknames');
 for (const bad of [`wss://x#${secret}#chat`, `#${secret}#server`, `wss://x##server`, `wss://x#short#server`,
-  `wss://x#${secret}#server#short`, `wss://x#${secret}#server#`, `wss://x#${secret}#server#${me.person}#a#b`])
+  `wss://x#${secret}#server#short`, `wss://x#${secret}#server#`, `wss://x#${secret}#server#${me.person}#a#b`,
+  `wss://x#${secret}#server#${me.person}#%E0`, `wss://x#${secret}#server#${me.person}#{}`,
+  `wss://x#${secret}#server#${me.person}#${encodeURIComponent(JSON.stringify(['x'.repeat(21)]))}`,
+  `wss://x#${secret}#server#${me.person}#${encodeURIComponent(JSON.stringify([' ']))}`,
+  `wss://x#${secret}#server#${me.person}#${encodeURIComponent(JSON.stringify([1]))}`])
   assert.equal(parsePairingCode(bad), null, bad);
 
 console.log('protocol ok');
