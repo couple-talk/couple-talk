@@ -1,9 +1,9 @@
 // Status chips: the built-in six plus the ones I made (#12), kept on this PC only. Both travel as the same
 // `status` payload, so a made-up status reaches an older app on the other side unchanged.
-import { sendPayload } from './chat';
+import { net, sendPayload } from './chat';
 import { STATUSES } from './protocol';
 import { bindForm } from './setup';
-import { $, load, save } from './state';
+import { $, config, load, save } from './state';
 
 type Status = readonly [emoji: string, text: string, pose?: string];
 const mine = load<Status[]>('ct.statuses', []);
@@ -38,6 +38,18 @@ $('#status-poses').append(...[['', '없음'], ...STATUSES.map(([emoji, , pose]) 
   l.append(Object.assign(document.createElement('input'), { type: 'radio', name: 'pose', value, checked: i === 0 }), ` ${label}`);
   return l;
 }));
+
+// Scheduled 퇴근 (#12): past the set time, once a day, while the app is running and connected.
+// `>=` rather than `===` so a PC asleep at that minute still sends when it wakes (and so does opening the app later that evening).
+const OFF = STATUSES.find((s) => s[2] === 'status_off')!;
+setInterval(async () => {
+  const at = config?.offAt;
+  if (!at || !net) return;
+  const now = new Date();
+  const today = now.toDateString();
+  if (now.toTimeString().slice(0, 5) < at || load('ct.offSent', '') === today) return;
+  if (await sendPayload({ type: 'status', emoji: OFF[0], text: OFF[1], pose: OFF[2] })) save('ct.offSent', today);
+}, 30_000);
 
 bindForm('#status-form', async (f) => {
   const emoji = String(f.get('emoji')).trim();

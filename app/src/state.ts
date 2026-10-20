@@ -6,9 +6,10 @@ import { sentBy, type Mode } from './protocol';
 // pastNicks: names I used before a rename, so my messages from before person ids (or from an older app) still count as mine.
 // notifyText: put the message text in OS notifications; off by default since they may show on a shared screen (#5).
 // tapToView: photos stay a placeholder until clicked, for screens others can see (#10).
+// offAt: 'HH:MM' at which 🏃 퇴근! is sent once a day while the app runs (#12); absent, never.
 export type Config = {
   server: string; wrapped: string; peppered: boolean; nick: string; mode: Mode; device: string; person: string;
-  hidePetText?: boolean; pastNicks?: string[]; notifyText?: boolean; tapToView?: boolean;
+  hidePetText?: boolean; pastNicks?: string[]; notifyText?: boolean; tapToView?: boolean; offAt?: string;
 };
 
 export const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
