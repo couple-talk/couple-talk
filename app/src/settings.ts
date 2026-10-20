@@ -18,8 +18,9 @@ $('#show-settings').onclick = () => {
   dialog.showModal();
 };
 
-// Messages are attributed by nickname until #7 keys people by id, so the old name is kept as still mine
-// and the partner's name is refused; past messages keep showing the old name on both screens.
+// The old name is kept as still mine for messages without a person id (from before #7 or from an older app),
+// and the partner's name is refused because an older app on their side still tells us apart by name.
+// Past messages keep showing the old name on both screens.
 bindForm('#nick-form', async (f) => {
   const nick = String(f.get('nick')).trim();
   if (!nick) throw new Error('닉네임을 입력해 주세요');
