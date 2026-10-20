@@ -1,16 +1,19 @@
 // Partner presence and read receipts, carried by sealed signals the relay passes on but never stores.
 import { open, seal } from './crypto';
-import { net, room } from './chat';
+import { net, petAway, room } from './chat';
 import { isSignal, type Signal } from './protocol';
 import { $, config, isMe, load, save } from './state';
-import { setUnread } from './tauri';
+import { idleSecs, setUnread } from './tauri';
 
 const BEAT_MS = 10_000;
 // A beat or two can go missing on a slow network; past this the partner counts as gone (#3: offline within 30s).
 const GONE_MS = 25_000;
+// Issue #12: five minutes without input shows me as away. Judged by the OS, not this window, which is mostly hidden.
+const AWAY_MS = 5 * 60_000;
 
 // seen: when the partner's last signal arrived. read: newest of my messages they've read. Kept so the marks survive a restart.
-let partner = load<{ seen: number; read: number }>('ct.presence', { seen: 0, read: 0 });
+let partner = load<{ seen: number; read: number; away?: boolean }>('ct.presence', { seen: 0, read: 0 });
+let myAway = false;
 let newest = 0; // newest message id rendered, so a partner can't mark messages that don't exist yet as read
 let newestTheirs = 0;
 let myRead = 0; // what I last reported
@@ -24,7 +27,10 @@ async function beat() {
   // Judged on every beat, not only on focus events: a WebView restored from the tray may send none,
   // so what I'm looking at counts as read within one beat at the latest.
   if (looking()) myRead = Math.max(myRead, newestTheirs);
-  const s: Signal = { v: 1, type: 'here', from: config!.nick, p: config!.person, read: myRead };
+  const idle = await idleSecs();
+  const away = idle !== null && idle * 1000 >= AWAY_MS;
+  if (away !== myAway) petAway('me', (myAway = away));
+  const s: Signal = { v: 1, type: 'here', from: config!.nick, p: config!.person, read: myRead, ...(away && { away }) };
   net.signal(await seal(room.key, s));
 }
 
@@ -63,8 +69,9 @@ export async function receiveSignal(blob: string) {
   try { s = await open(room.key, blob); } catch { return; }
   if (!isSignal(s) || isMe(s)) return;
   const before = partner;
-  partner = { seen: Date.now(), read: Math.max(partner.read, Math.min(s.read, newest)) };
+  partner = { seen: Date.now(), read: Math.max(partner.read, Math.min(s.read, newest)), away: !!s.away };
   save('ct.presence', partner);
+  if (partner.away !== !!before.away) petAway('partner', !!s.away);
   // Marks only change when they read further or on their first signal, so don't repaint thousands of rows per beat.
   if (partner.read !== before.read || !before.seen) document.querySelectorAll<HTMLElement>('#messages .msg.mine[data-id]').forEach(paint);
   showPresence();
@@ -81,8 +88,9 @@ function ago(ms: number) {
 function showPresence() {
   const el = $('#presence');
   const gone = Date.now() - partner.seen;
-  el.className = gone < GONE_MS ? 'on' : '';
-  el.textContent = gone < GONE_MS ? '접속 중' : partner.seen ? `마지막 접속 ${ago(gone)}` : '';
+  const here = gone < GONE_MS;
+  el.className = !here ? '' : partner.away ? 'away' : 'on';
+  el.textContent = !here ? (partner.seen ? `마지막 접속 ${ago(gone)}` : '') : partner.away ? '자리 비움' : '접속 중';
 }
 
 /** After each history replay: announce myself right away instead of on the next beat. */

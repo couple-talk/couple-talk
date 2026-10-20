@@ -67,9 +67,11 @@ export function isValid(p: unknown): p is Payload {
 
 // Sent sealed over the `signal` op (never stored): a heartbeat that also carries how far I've read.
 // read: id of the newest partner message I've seen in a focused window. Server ids are the same on both sides.
-export type Signal = { v: 1; type: 'here'; from: string; p?: string; read: number };
+// away: no input on my PC for a while (#12); left out when I'm there, and by older apps.
+export type Signal = { v: 1; type: 'here'; from: string; p?: string; read: number; away?: boolean };
 
 export function isSignal(p: unknown): p is Signal {
   const o = p as Record<string, unknown> | null;
-  return !!o && typeof o === 'object' && o.type === 'here' && typeof o.from === 'string' && personOk(o.p) && Number.isSafeInteger(o.read) && (o.read as number) >= 0;
+  return !!o && typeof o === 'object' && o.type === 'here' && typeof o.from === 'string' && personOk(o.p) && Number.isSafeInteger(o.read) && (o.read as number) >= 0
+    && (o.away === undefined || typeof o.away === 'boolean');
 }

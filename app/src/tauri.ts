@@ -37,6 +37,13 @@ export async function setUnread(n: number) {
   await invoke('set_unread', { n });
 }
 
+/** Seconds since the last input on this PC, or null in a plain browser, which can't tell and so is never away. */
+export async function idleSecs(): Promise<number | null> {
+  if (!isTauri) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<number>('idle_secs').catch(() => null);
+}
+
 /** OS notification for a new message. Without `text` it only says that one arrived. */
 export async function notify(text?: string) {
   if (!isTauri) return;

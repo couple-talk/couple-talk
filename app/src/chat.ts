@@ -120,6 +120,11 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   return p;
 }
 
+/** While a side is away (#12) their pet shows 💤 and stands as usual; back, it shows their status again. */
+export function petAway(who: Who, away: boolean) {
+  petEmit(away ? { type: 'status', emoji: '💤', from: who } : statuses[who] ?? { type: 'status', emoji: '', from: who });
+}
+
 export async function sendPayload(p: Record<string, unknown>) {
   const n = randomId();
   const ok = net.send(await seal(room.key, { v: 1, from: config!.nick, p: config!.person, n, at: Date.now(), ...p }), await receiptOf(n));

@@ -41,5 +41,7 @@ assert.ok(!isValid({ v: 1, from: 'me', p: 'short', type: 'chat', text: 'hi' }), 
 assert.ok(!isValid({ v: 1, from: 'me', p: 1, type: 'chat', text: 'hi' }));
 assert.ok(isSignal({ v: 1, type: 'here', from: 'me', p: me.person, read: 0 }));
 assert.ok(!isSignal({ v: 1, type: 'here', from: 'me', p: 'short', read: 0 }));
+assert.ok(isSignal({ v: 1, type: 'here', from: 'me', read: 0, away: true }), 'away (#12) rides on the heartbeat');
+assert.ok(!isSignal({ v: 1, type: 'here', from: 'me', read: 0, away: 'yes' }));
 
 console.log('protocol ok');
