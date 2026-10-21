@@ -4,7 +4,7 @@ import { applyCharacter, wanted } from './characters';
 import { imageElement, keepFile } from './images';
 import { connect, type Item } from './net';
 import type { Who } from './pack';
-import { connected, looking, receiveSignal, rendered, startPresence } from './presence';
+import { awayOf, connected, looking, receiveSignal, rendered, startPresence } from './presence';
 import { ACTIONS, isValid, type Mode, type Payload } from './protocol';
 import { $, config, isMe, load, save, setConfig, show } from './state';
 import { notify, petEmit, petListen, type PetEvent } from './tauri';
@@ -148,5 +148,6 @@ $('#actions').append(...Object.entries(ACTIONS).map(([kind, [emoji, label]]) => 
 }));
 
 petListen(() => {
-  for (const s of Object.values(statuses)) petEmit(s);
+  // The status, or 💤 over it while that side is away: a pet window can (re)start mid-absence.
+  for (const who of ['me', 'partner'] as const) petAway(who, awayOf(who));
 });

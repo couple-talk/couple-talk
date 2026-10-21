@@ -2,6 +2,7 @@
 import { open, seal } from './crypto';
 import { net, petAway, room } from './chat';
 import { isSignal, type Signal } from './protocol';
+import type { Who } from './pack';
 import { $, config, isMe, load, save } from './state';
 import { idleSecs, setUnread } from './tauri';
 
@@ -12,8 +13,10 @@ const GONE_MS = 25_000;
 const AWAY_MS = 5 * 60_000;
 
 // seen: when the partner's last signal arrived. read: newest of my messages they've read. Kept so the marks survive a restart.
-let partner = load<{ seen: number; read: number; away?: boolean }>('ct.presence', { seen: 0, read: 0 });
+// away is not saved: a restart must treat the first `away` signal as a change so the pet gets its 💤 again.
+let partner: { seen: number; read: number; away?: boolean } = load('ct.presence', { seen: 0, read: 0 });
 let myAway = false;
+export const awayOf = (who: Who) => (who === 'me' ? myAway : !!partner.away);
 let newest = 0; // newest message id rendered, so a partner can't mark messages that don't exist yet as read
 let newestTheirs = 0;
 let myRead = 0; // what I last reported
@@ -70,7 +73,7 @@ export async function receiveSignal(blob: string) {
   if (!isSignal(s) || isMe(s)) return;
   const before = partner;
   partner = { seen: Date.now(), read: Math.max(partner.read, Math.min(s.read, newest)), away: !!s.away };
-  save('ct.presence', partner);
+  save('ct.presence', { seen: partner.seen, read: partner.read });
   if (partner.away !== !!before.away) petAway('partner', !!s.away);
   // Marks only change when they read further or on their first signal, so don't repaint thousands of rows per beat.
   if (partner.read !== before.read || !before.seen) document.querySelectorAll<HTMLElement>('#messages .msg.mine[data-id]').forEach(paint);

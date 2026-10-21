@@ -39,7 +39,7 @@ $('#status-poses').append(...[['', '없음'], ...STATUSES.map(([emoji, , pose]) 
   return l;
 }));
 
-// Scheduled 퇴근 (#12): past the set time, once a day, while the app is running and connected.
+// Scheduled 퇴근 (#12): past the set time on a weekday, once a day, while the app is running and connected.
 // `>=` rather than `===` so a PC asleep at that minute still sends when it wakes (and so does opening the app later that evening).
 const OFF = STATUSES.find((s) => s[2] === 'status_off')!;
 setInterval(async () => {
@@ -47,7 +47,7 @@ setInterval(async () => {
   if (!at || !net) return;
   const now = new Date();
   const today = now.toDateString();
-  if (now.toTimeString().slice(0, 5) < at || load('ct.offSent', '') === today) return;
+  if (now.getDay() % 6 === 0 || now.toTimeString().slice(0, 5) < at || load('ct.offSent', '') === today) return;
   if (await sendPayload({ type: 'status', emoji: OFF[0], text: OFF[1], pose: OFF[2] })) save('ct.offSent', today);
 }, 30_000);
 
@@ -57,7 +57,11 @@ bindForm('#status-form', async (f) => {
   const pose = String(f.get('pose')) || undefined;
   if ([...segmenter.segment(emoji)].length !== 1) throw new Error('이모지는 하나만 넣어 주세요');
   if (!text) throw new Error('문구를 입력해 주세요');
-  if (!mine.some(([e, t]) => e === emoji && t === text)) { mine.push([emoji, text, pose]); save('ct.statuses', mine); render(); }
+  // Same emoji and phrase again: keep one chip, with the pose chosen this time.
+  const i = mine.findIndex(([e, t]) => e === emoji && t === text);
+  mine.splice(i < 0 ? mine.length : i, 1, [emoji, text, pose]);
+  save('ct.statuses', mine);
+  render();
   $<HTMLFormElement>('#status-form').reset();
   dialog.close();
   await sendPayload({ type: 'status', emoji, text, pose });
