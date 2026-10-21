@@ -4,10 +4,10 @@ import { applyCharacter, wanted } from './characters';
 import { imageElement, keepFile } from './images';
 import { connect, type Item } from './net';
 import type { Who } from './pack';
-import { connected, looking, receiveSignal, rendered, startPresence } from './presence';
-import { ACTIONS, isValid, STATUSES, type Mode, type Payload } from './protocol';
+import { awayOf, connected, looking, receiveSignal, rendered, startPresence } from './presence';
+import { ACTIONS, isValid, type Mode, type Payload } from './protocol';
 import { $, config, isMe, load, save, setConfig, show } from './state';
-import { notify, petEmit, petListen } from './tauri';
+import { notify, petEmit, petListen, type PetEvent } from './tauri';
 
 // ponytail: localStorage caps around 5MB; move local history to IndexedDB if couples hit it.
 const LOCAL_HISTORY_MAX = 5000;
@@ -15,7 +15,7 @@ const LOCAL_HISTORY_MAX = 5000;
 export let room: Room;
 export let secretBytes: Bytes;
 let lastId = 0;
-const statuses: Record<Who, string> = { me: '', partner: '' };
+const statuses: Partial<Record<Who, PetEvent>> = {}; // the latest status per side, replayed to a pet window that starts later
 const seen = new Set<number>();
 const seenNonces = new Set<string>();
 export let net: ReturnType<typeof connect>;
@@ -99,9 +99,9 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
       else if ((wanted[who]?.id ?? -1) < it.id) wanted[who] = { id: it.id, pack: p.pack };
     }
     if (p.type === 'status') {
-      statuses[mine ? 'me' : 'partner'] = p.emoji;
+      const who = mine ? 'me' : 'partner';
       if (!mine) $('#partner').textContent = `${p.from} ${p.emoji} ${p.text}`;
-      petEmit({ type: 'status', emoji: p.emoji, from: mine ? 'me' : 'partner' });
+      petEmit((statuses[who] = { type: 'status', emoji: p.emoji, pose: p.pose, from: who }));
     }
   }
   row.querySelector('.time')!.textContent = time;
@@ -120,6 +120,11 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   return p;
 }
 
+/** While a side is away (#12) their pet shows 💤 and stands as usual; back, it shows their status again. */
+export function petAway(who: Who, away: boolean) {
+  petEmit(away ? { type: 'status', emoji: '💤', from: who } : statuses[who] ?? { type: 'status', emoji: '', from: who });
+}
+
 export async function sendPayload(p: Record<string, unknown>) {
   const n = randomId();
   const ok = net.send(await seal(room.key, { v: 1, from: config!.nick, p: config!.person, n, at: Date.now(), ...p }), await receiptOf(n));
@@ -134,12 +139,6 @@ $<HTMLFormElement>('#send-form').onsubmit = async (e) => {
   if (await sendPayload({ type: 'chat', text: input.value })) input.value = '';
 };
 
-$('#statuses').append(...STATUSES.map(([emoji, text]) => {
-  const b = document.createElement('button');
-  b.textContent = `${emoji} ${text}`;
-  b.onclick = () => sendPayload({ type: 'status', emoji, text });
-  return b;
-}));
 $('#actions').append(...Object.entries(ACTIONS).map(([kind, [emoji, label]]) => {
   const b = document.createElement('button');
   b.textContent = emoji;
@@ -149,5 +148,6 @@ $('#actions').append(...Object.entries(ACTIONS).map(([kind, [emoji, label]]) => 
 }));
 
 petListen(() => {
-  for (const from of ['me', 'partner'] as const) if (statuses[from]) petEmit({ type: 'status', emoji: statuses[from], from });
+  // The status, or 💤 over it while that side is away: a pet window can (re)start mid-absence.
+  for (const who of ['me', 'partner'] as const) petAway(who, awayOf(who));
 });

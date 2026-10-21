@@ -25,6 +25,8 @@ tauri-plugin-notification = "2"
 # Desktop only (#5); the mobile app (#17) has its own way to hide and to notify.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
+# OS idle time for away detection (#12). No default features: x11 is Linux-only and we build macOS and Windows.
+user-idle = { version = "0.6", default-features = false }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

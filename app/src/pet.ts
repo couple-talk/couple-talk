@@ -2,15 +2,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit, emitTo } from '@tauri-apps/api/event';
 import { currentMonitor, getCurrentWindow, LogicalPosition, LogicalSize, Window, type Monitor } from '@tauri-apps/api/window';
 import { loadPack, type Who } from './pack';
+import { STATUSES } from './protocol';
 import type { PetEvent } from './tauri';
 
 // Packs only supply poses (docs/character-pack.md); every motion and effect lives here.
 type Reaction = { pose: string; anim: string; emoji?: string; fx?: 'send' | 'hit' };
 
 const REACT_MS = 4000;
-const STATUS_POSES: Record<string, string> = {
-  '💻': 'status_work', '🗓️': 'status_meeting', '🍚': 'status_eat', '☕': 'status_rest', '🔥': 'status_busy', '🏃': 'status_off',
-};
+const STATUS_POSES: Record<string, string> = Object.fromEntries(STATUSES.map(([emoji, , pose]) => [emoji, pose]));
 // The character whose owner acted plays the plain key; the other one plays `:hit`.
 const REACTIONS: Record<string, Reaction> = {
   chat: { pose: 'notify', anim: 'jump', emoji: '💬' },
@@ -123,7 +122,8 @@ setInterval(() => {
   if (!shown) return; // hidden partner window: x stays frozen with it, so show() does not jump
   const now = Date.now();
   const walking = now > pauseUntil && now > reactUntil && now > statusUntil;
-  const next = now < reactUntil ? reactPose : now < statusUntil ? statusPose : walking ? 'walk' : 'idle';
+  // Standing still shows the owner's status pose (#12), so a glance at the pet tells what they're up to.
+  const next = now < reactUntil ? reactPose : now < statusUntil ? statusPose : walking ? 'walk' : statusPose || 'idle';
   if (next !== pose) { pose = next; frame = 0; draw(); }
   pet.classList.toggle('walking', walking);
   if (!walking) return;
@@ -201,7 +201,8 @@ await win.listen<PetEvent>('pet', async ({ payload: e }) => {
   if (e.from !== who && e.type !== 'action') return;
   if (e.type === 'status') {
     document.getElementById('status')!.textContent = e.emoji;
-    if (STATUS_POSES[e.emoji]) { statusPose = STATUS_POSES[e.emoji]; statusUntil = Date.now() + REACT_MS; }
+    statusPose = e.pose ?? STATUS_POSES[e.emoji] ?? '';
+    statusUntil = Date.now() + REACT_MS;
     return;
   }
   const r = REACTIONS[e.type === 'chat' ? 'chat' : e.kind + (e.from === who ? '' : ':hit')];

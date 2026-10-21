@@ -12,6 +12,7 @@ $('#show-settings').onclick = () => {
   $<HTMLInputElement>('#hide-pet-text').checked = !!config!.hidePetText;
   $<HTMLInputElement>('#notify-text').checked = !!config!.notifyText;
   $<HTMLInputElement>('#tap-to-view').checked = !!config!.tapToView;
+  $<HTMLInputElement>('#off-at').value = config!.offAt ?? '';
   $('#set-server').textContent = config!.server;
   $('#set-mode').textContent = config!.mode === 'server' ? '서버 (암호문 보관)' : '각자 PC에만';
   dialog.querySelectorAll('.error').forEach((e) => (e.textContent = ''));
@@ -36,6 +37,7 @@ bindForm('#nick-form', async (f) => {
 $<HTMLInputElement>('#hide-pet-text').onchange = (e) => setConfig({ ...config!, hidePetText: (e.currentTarget as HTMLInputElement).checked });
 $<HTMLInputElement>('#notify-text').onchange = (e) => setConfig({ ...config!, notifyText: (e.currentTarget as HTMLInputElement).checked });
 $<HTMLInputElement>('#tap-to-view').onchange = (e) => setConfig({ ...config!, tapToView: (e.currentTarget as HTMLInputElement).checked });
+$<HTMLInputElement>('#off-at').onchange = (e) => setConfig({ ...config!, offAt: (e.currentTarget as HTMLInputElement).value || undefined });
 // Notifications, the tray and the shortcut only exist in the desktop app.
 $('#notify-text').closest('label')!.hidden = $('#shortcut-hint').hidden = !isTauri;
 
