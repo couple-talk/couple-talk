@@ -21,7 +21,7 @@ export async function deviceKey(create: boolean): Promise<Uint8Array<ArrayBuffer
 export type PetEvent =
   | { type: 'reload' }
   | { type: 'chat'; from: Who; text?: string }
-  | { type: 'status'; emoji: string; from: Who }
+  | { type: 'status'; emoji: string; pose?: string; from: Who }
   | { type: 'action'; kind: string; from: Who };
 
 export async function petEmit(e: PetEvent) {
@@ -35,6 +35,13 @@ export async function setUnread(n: number) {
   if (!isTauri) return;
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('set_unread', { n });
+}
+
+/** Seconds since the last input on this PC, or null in a plain browser, which can't tell and so is never away. */
+export async function idleSecs(): Promise<number | null> {
+  if (!isTauri) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<number>('idle_secs').catch(() => null);
 }
 
 /** OS notification for a new message. Without `text` it only says that one arrived. */

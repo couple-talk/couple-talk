@@ -2,6 +2,7 @@ import './style.css';
 // Each screen's module binds its own buttons and forms when imported.
 import './setup';
 import './chat';
+import './status';
 import './characters';
 import './settings';
 import { $, config, show } from './state';

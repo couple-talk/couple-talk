@@ -6,7 +6,8 @@ export type Mode = 'server' | 'local';
 // n: per-message nonce (replay detection + delivery receipt), at: sender clock. Both are absent in pre-receipt messages.
 export type Payload = { v: 1; from: string; p?: string; n?: string; at?: number } & (
   | { type: 'chat'; text: string }
-  | { type: 'status'; emoji: string; text: string }
+  // pose: one of the pack's status poses (#12) for a made-up status; absent, the pet picks by emoji.
+  | { type: 'status'; emoji: string; text: string; pose?: string }
   | { type: 'action'; kind: keyof typeof ACTIONS }
   // pack: sha256 of the sealed pack on the relay, or null for the built-in character
   | { type: 'character'; pack: string | null; name: string }
@@ -64,7 +65,15 @@ export function isImageFile(f: unknown): f is ImageFile {
     && typeof o.data === 'string' && o.data.length <= IMAGE_FILE_MAX;
 }
 
-export const STATUSES = [['💻', '일하는 중'], ['🗓️', '회의 중'], ['🍚', '밥 먹는 중'], ['☕', '쉬는 중'], ['🔥', '바빠요'], ['🏃', '퇴근!']];
+// [emoji, text, pose]: the pose names are the status poses every pack must have (pack.ts REQUIRED_POSES).
+export const STATUSES = [
+  ['💻', '일하는 중', 'status_work'], ['🗓️', '회의 중', 'status_meeting'], ['🍚', '밥 먹는 중', 'status_eat'],
+  ['☕', '쉬는 중', 'status_rest'], ['🔥', '바빠요', 'status_busy'], ['🏃', '퇴근!', 'status_off'],
+] as const;
+export const STATUS_POSES: readonly string[] = STATUSES.map((s) => s[2]);
+// Long enough for any emoji sequence and a short phrase; the header shows both on one line.
+export const STATUS_EMOJI_MAX = 16;
+export const STATUS_TEXT_MAX = 20;
 export const ACTIONS = { poke: ['👉', '콕 찔렀어요'], heart: ['❤️', '하트를 보냈어요'], hug: ['🤗', '안아줬어요'] } as const;
 
 // A decrypted payload still comes from the partner's client; a bad one must not break rendering forever.
@@ -73,7 +82,9 @@ export function isValid(p: unknown): p is Payload {
   if (!o || typeof o !== 'object' || typeof o.from !== 'string' || !personOk(o.p)) return false;
   if ((o.n !== undefined && typeof o.n !== 'string') || (o.at !== undefined && typeof o.at !== 'number')) return false;
   if (o.type === 'chat') return typeof o.text === 'string';
-  if (o.type === 'status') return typeof o.emoji === 'string' && typeof o.text === 'string';
+  if (o.type === 'status')
+    return typeof o.emoji === 'string' && o.emoji.length <= STATUS_EMOJI_MAX && typeof o.text === 'string' && o.text.length <= STATUS_TEXT_MAX
+      && (o.pose === undefined || STATUS_POSES.includes(o.pose as string));
   if (o.type === 'character')
     return (o.pack === null || (typeof o.pack === 'string' && HASH_RE.test(o.pack))) && typeof o.name === 'string' && o.name.length <= 20;
   if (o.type === 'image') {
@@ -85,9 +96,11 @@ export function isValid(p: unknown): p is Payload {
 
 // Sent sealed over the `signal` op (never stored): a heartbeat that also carries how far I've read.
 // read: id of the newest partner message I've seen in a focused window. Server ids are the same on both sides.
-export type Signal = { v: 1; type: 'here'; from: string; p?: string; read: number };
+// away: no input on my PC for a while (#12); left out when I'm there, and by older apps.
+export type Signal = { v: 1; type: 'here'; from: string; p?: string; read: number; away?: boolean };
 
 export function isSignal(p: unknown): p is Signal {
   const o = p as Record<string, unknown> | null;
-  return !!o && typeof o === 'object' && o.type === 'here' && typeof o.from === 'string' && personOk(o.p) && Number.isSafeInteger(o.read) && (o.read as number) >= 0;
+  return !!o && typeof o === 'object' && o.type === 'here' && typeof o.from === 'string' && personOk(o.p) && Number.isSafeInteger(o.read) && (o.read as number) >= 0
+    && (o.away === undefined || typeof o.away === 'boolean');
 }

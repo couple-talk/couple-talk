@@ -169,6 +169,22 @@ fn notify(app: AppHandle, body: Option<String>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Seconds since the last keyboard or mouse input anywhere on this PC; the app shows me as away past five
+/// minutes of none (#12). The WebView can't tell: the chat window is usually hidden and the pets only see the
+/// pointer when it is over them.
+#[cfg(desktop)]
+#[tauri::command]
+fn idle_secs() -> Result<u64, String> {
+    user_idle::UserIdle::get_time().map(|t| t.as_seconds()).map_err(|e| format!("{e:?}"))
+}
+
+/// Phones have no idle input in this sense; the mobile app (#17) can decide what away means there.
+#[cfg(not(desktop))]
+#[tauri::command]
+fn idle_secs() -> Result<u64, String> {
+    Ok(0)
+}
+
 #[cfg(desktop)]
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem};
@@ -221,7 +237,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(Ui::default())
-        .invoke_handler(tauri::generate_handler![device_key, pets_visible, set_unread, notify])
+        .invoke_handler(tauri::generate_handler![device_key, pets_visible, set_unread, notify, idle_secs])
         .setup(|app| {
             #[cfg(desktop)]
             {
