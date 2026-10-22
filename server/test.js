@@ -1,4 +1,4 @@
-// Spawns the relay on a temp db and checks auth, broadcast, history, local-mode ack and signal relay.
+// Spawns the relay on a temp db and checks auth, broadcast, history, local-mode ack, signal relay and crash handling.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -10,14 +10,15 @@ import WebSocket from 'ws';
 
 const PORT = 18080;
 const METRICS_PORT = 18081;
-const DB_PATH = join(mkdtempSync(join(tmpdir(), 'ct-')), 'test.db');
+const DIR = mkdtempSync(join(tmpdir(), 'ct-'));
+const DB_PATH = join(DIR, 'test.db');
 // start from the pre-receipt schema to cover the migration
 new DatabaseSync(DB_PATH).exec(`CREATE TABLE messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, sender TEXT NOT NULL, ts INTEGER NOT NULL, blob TEXT NOT NULL)`);
 const srv = spawn('node', ['server.js'], {
   // Small upload budget and fast heartbeat so the stalled-upload case runs in under a second.
-  // FILE_ROOM_MAX small enough that a few 150KB photos overflow a room's budget.
-  env: { ...process.env, PORT, METRICS_PORT, DB_PATH, UPLOADS_MAX: 550 * 1024, UPLOAD_IDLE_MS: 300, HEARTBEAT_MS: 100, FILE_ROOM_MAX: 400 * 1024 },
+  // FILE_ROOM_MAX small enough that a few 150KB photos overflow a room's budget. EXPIRE_MS so the hourly sweep runs here.
+  env: { ...process.env, PORT, METRICS_PORT, DB_PATH, UPLOADS_MAX: 550 * 1024, UPLOAD_IDLE_MS: 300, HEARTBEAT_MS: 100, FILE_ROOM_MAX: 400 * 1024, EXPIRE_MS: 100 },
   stdio: 'inherit',
 });
 await new Promise((r) => setTimeout(r, 500));
@@ -36,6 +37,12 @@ function client(auth) {
 }
 
 try {
+  // a relay that can't take its port must exit so the restart policy and health check notice, not idle on metrics
+  const dup = spawn('node', ['server.js'], { env: { ...process.env, PORT, METRICS_PORT: 18082, DB_PATH: join(DIR, 'dup.db') }, stdio: 'ignore' });
+  const code = await Promise.race([new Promise((r) => dup.on('exit', r)), new Promise((r) => setTimeout(r, 3000, 'still running'))]);
+  dup.kill();
+  assert.ok(Number.isInteger(code) && code !== 0, `a port conflict exits non-zero (got ${code})`);
+
   // server mode: history + broadcast
   const room = { roomId: id(), token: id() };
   const a = await client({ ...room, device: id() });
@@ -243,6 +250,8 @@ try {
   new DatabaseSync(DB_PATH).exec('DROP TABLE rooms');
   assert.equal((await fetch(`http://localhost:${METRICS_PORT}/metrics`)).status, 503);
   assert.equal((await fetch(`http://localhost:${PORT}/healthz`)).status, 503, 'process still up after the failed scrape');
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(srv.exitCode, null, 'a failed expiry sweep does not take the relay down');
 
   console.log('server ok');
   for (const ws of [a, b, c, la, intruder, lb, lb2]) ws.close();

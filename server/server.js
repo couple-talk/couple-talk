@@ -32,6 +32,7 @@ const SEND_BUFFER_MAX = 16 * 1024 * 1024;
 const UPLOADS_MAX = Number(process.env.UPLOADS_MAX ?? 128 * 1024 * 1024);
 const UPLOAD_IDLE_MS = Number(process.env.UPLOAD_IDLE_MS ?? 30_000);
 const HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS ?? 30_000);
+const EXPIRE_MS = Number(process.env.EXPIRE_MS ?? 3600 * 1000);
 let uploading = 0;
 const dropUpload = (ws) => { if (ws.upload) { uploading -= ws.upload.size; ws.upload = null; } };
 // ponytail: global cap on new rooms stops disk-filling spam but also blocks real sign-ups during an attack; per-IP limits need trusted proxy headers.
@@ -89,8 +90,9 @@ function pruneFiles(roomId) {
   let used = 0;
   for (const f of q.listFiles.all(roomId)) if ((used += f.size) > FILE_ROOM_MAX) q.delFile.run(roomId, f.hash);
 }
-expire();
-setInterval(expire, 3600 * 1000).unref();
+expire(); // at startup a broken db should fail fast
+// Later a throw here would kill the relay once an hour; the next sweep retries.
+setInterval(() => { try { expire(); } catch (e) { console.error('expire failed:', e.message); } }, EXPIRE_MS).unref();
 
 const sha256 = (s) => createHash('sha256').update(s).digest();
 const sha256b64 = (s) => sha256(s).toString('base64url');
@@ -214,7 +216,8 @@ createServer((req, res) => {
   ].join('\n') + '\n');
 }).listen(METRICS_PORT);
 const wss = new WebSocketServer({ server: http, maxPayload: PACK_PART + 1024 });
-wss.on('error', console.error);
+// Listen errors (EADDRINUSE) arrive here. Staying up would leave only the metrics port alive and look healthy to docker.
+wss.on('error', (e) => { console.error(e); process.exit(1); });
 // Cloudflare drops WebSockets idle for ~100s, and half-open sockets otherwise linger in `rooms`.
 setInterval(() => {
   for (const ws of wss.clients) {
