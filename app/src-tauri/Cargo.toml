@@ -1,6 +1,6 @@
 [package]
 name = "couple-talk"
-version = "0.1.0"
+version = "0.2.0"
 description = "End-to-end encrypted couple messenger with a desktop pet"
 license = "AGPL-3.0-only"
 edition = "2024"
