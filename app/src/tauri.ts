@@ -58,6 +58,13 @@ export async function petListen(onHello: () => void) {
   await listen('pet-hello', onHello);
 }
 
+/** An action picked from a pet's right-click menu (#6), for the main window to send. */
+export async function onPetSend(send: (kind: string) => void) {
+  if (!isTauri) return;
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
+  await getCurrentWindow().listen<string>('pet-send', ({ payload }) => send(payload));
+}
+
 /** Closing the main window only hides it so the connection and pet keep running. */
 export async function setupMainWindow() {
   if (!isTauri) return;
