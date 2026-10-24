@@ -1,6 +1,7 @@
 // The unlocked room: connection, history, rendering and sending.
 import { deriveRoom, legacyPerson, open, randomId, receiptOf, seal, type Bytes, type Room } from './crypto';
 import { applyCharacter, wanted } from './characters';
+import { itemsBefore, keepItem } from './history';
 import { imageElement, keepFile } from './images';
 import { connect, type Item } from './net';
 import type { Who } from './pack';
@@ -9,12 +10,13 @@ import { ACTIONS, isValid, type Mode, type Payload } from './protocol';
 import { $, config, isMe, load, save, setConfig, show } from './state';
 import { notify, petEmit, petListen, type PetEvent } from './tauri';
 
-// ponytail: localStorage caps around 5MB; move local history to IndexedDB if couples hit it.
-const LOCAL_HISTORY_MAX = 5000;
+// Rendered at start and per scroll-up page; matches the relay's HISTORY_LIMIT so both modes page alike.
+const PAGE = 500;
 
 export let room: Room;
 export let secretBytes: Bytes;
 let lastId = 0;
+let firstId = Infinity; // the oldest id on screen, where the next scroll-up page ends
 const statuses: Partial<Record<Who, PetEvent>> = {}; // the latest status per side, replayed to a pet window that starts later
 const seen = new Set<number>();
 const seenNonces = new Set<string>();
@@ -27,9 +29,8 @@ export async function start(secret: Bytes) {
   if (!config!.person) setConfig({ ...config!, person: await legacyPerson(secret, config!.pastNicks?.[0] ?? config!.nick) });
   show('chat');
   $('#me').textContent = config!.nick;
-  const local = load<Item[]>('ct.history', []);
   startPresence();
-  if (config!.mode === 'local') for (const it of local) await render(it, false);
+  if (config!.mode === 'local') for (const it of await itemsBefore(Infinity, PAGE)) await render(it, false);
 
   net = connect(config!.server, { roomId: room.roomId, token: room.token, device: config!.device, mode: config!.mode }, () => lastId, {
     onState: (online, error) => {
@@ -48,20 +49,20 @@ export async function start(secret: Bytes) {
 
 async function receive(it: Item, live: boolean, mode: Mode) {
   if (seen.has(it.id)) return;
-  if (mode === 'local') {
-    const hist = load<Item[]>('ct.history', []);
-    hist.push(it);
-    save('ct.history', hist.slice(-LOCAL_HISTORY_MAX));
-  }
+  if (mode === 'local') await keepItem(it);
   const p = await render(it, live);
   if (mode === 'local' && p?.n && !isMe(p)) net.ack(it.id, p.n);
 }
 
-/** Returns the payload (even for a replayed copy, so it can still be acked) or null if unreadable. */
-async function render(it: Item, live: boolean): Promise<Payload | null> {
+/**
+ * Returns the payload (even for a replayed copy, so it can still be acked) or null if unreadable.
+ * `older` rows (scrolling up, #8) go above the rest and leave the current name, status and pet alone.
+ */
+async function render(it: Item, live: boolean, older = false): Promise<Payload | null> {
   if (seen.has(it.id)) return null;
   seen.add(it.id);
   lastId = Math.max(lastId, it.id);
+  firstId = Math.min(firstId, it.id);
   let p: Payload;
   try { p = await open<Payload>(room.key, it.blob); } catch { return null; }
   if (!isValid(p)) return null;
@@ -72,7 +73,7 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   }
   const mine = isMe(p);
   // The partner's pet appears (with this name) once we've heard from them.
-  if (!mine && load<string | null>('ct.partner', null) !== p.from) { save('ct.partner', p.from); petEmit({ type: 'reload' }); }
+  if (!older && !mine && load<string | null>('ct.partner', null) !== p.from) { save('ct.partner', p.from); petEmit({ type: 'reload' }); }
   const time = new Date(p.at ?? it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const row = document.createElement('div');
 
@@ -98,7 +99,7 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
       if (live) applyCharacter(who, p.pack, it.id);
       else if ((wanted[who]?.id ?? -1) < it.id) wanted[who] = { id: it.id, pack: p.pack };
     }
-    if (p.type === 'status') {
+    if (p.type === 'status' && !older) {
       const who = mine ? 'me' : 'partner';
       if (!mine) $('#partner').textContent = `${p.from} ${p.emoji} ${p.text}`;
       petEmit((statuses[who] = { type: 'status', emoji: p.emoji, pose: p.pose, from: who }));
@@ -106,6 +107,7 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
   }
   row.querySelector('.time')!.textContent = time;
   const list = $('#messages');
+  if (older) { list.prepend(row); return p; }
   list.append(row);
   list.scrollTop = list.scrollHeight;
   // Chat text only travels to this app's own pet windows (a local Tauri event, never the network).
@@ -124,6 +126,23 @@ async function render(it: Item, live: boolean): Promise<Payload | null> {
 export function petAway(who: Who, away: boolean) {
   petEmit(away ? { type: 'status', emoji: '💤', from: who } : statuses[who] ?? { type: 'status', emoji: '', from: who });
 }
+
+// Scrolling near the top loads the page before the oldest row, keeping the rows in view where they were.
+let paging = false;
+let atStart = false;
+$('#messages').addEventListener('scroll', async (e) => {
+  const list = e.currentTarget as HTMLElement;
+  if (paging || atStart || list.scrollTop > 80 || firstId === Infinity) return;
+  paging = true;
+  try {
+    const items = config!.mode === 'local' ? await itemsBefore(firstId, PAGE) : await net.older(firstId).catch(() => undefined);
+    if (items === undefined) return; // offline or rate limited: the next scroll tries again
+    if (!items?.length) { atStart = true; return; }
+    const height = list.scrollHeight;
+    for (const it of items.reverse()) await render(it, false, true);
+    list.scrollTop += list.scrollHeight - height;
+  } finally { paging = false; }
+});
 
 export async function sendPayload(p: Record<string, unknown>) {
   const n = randomId();

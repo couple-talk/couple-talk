@@ -18,6 +18,8 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
   let signals = false;
   // Whether put/get take `kind: 'file'` (photos, #10); an older relay would file a photo as my character pack.
   let files: boolean | null = null;
+  // Whether the relay pages older history with `before` (#8).
+  let history = false;
   // put/get replies arrive as op 'stored'/'pack' keyed by hash; error replies echo the hash.
   type Wait = { p: Promise<any>; ok: (m: any) => void; fail: (e: Error) => void };
   const waits = new Map<string, Wait>();
@@ -28,17 +30,19 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
     ws.onopen = () => ws.send(JSON.stringify({ op: 'auth', v: 1, ...auth, since: since() }));
     ws.onmessage = (e) => {
       const m = JSON.parse(e.data);
-      if (m.op === 'ready') { packs = m.packs ?? 0; signals = m.signals === 1; files = m.files === 1; h.onState(true); h.onReady(m.mode, m.items); }
+      if (m.op === 'ready') { packs = m.packs ?? 0; signals = m.signals === 1; files = m.files === 1; history = m.history === 1; h.onState(true); h.onReady(m.mode, m.items); }
       else if (m.op === 'msg') h.onMsg(m);
       else if (m.op === 'signal' && typeof m.blob === 'string') h.onSignal(m.blob);
       else if (m.op === 'stored' || m.op === 'pack' || m.op === 'file') settle(m.op + m.hash, (w) => w.ok(m));
+      else if (m.op === 'older') settle('older' + m.before, (w) => w.ok(m));
       else if (m.op === 'error') {
         fatal = m.error === 'unauthorized';
         if (m.hash) for (const k of ['stored', 'pack', 'file']) settle(k + m.hash, (w) => w.fail(new Error(m.error)));
+        else if (m.before !== undefined) settle('older' + m.before, (w) => w.fail(new Error(m.error)));
         else if (m.error === 'unknown op') failAll(new Error(m.error)); // relay without pack support
       }
     };
-    ws.onclose = () => { packs = null; signals = false; files = null; failAll(new Error('offline')); h.onState(false, fatal ? 'unauthorized' : undefined); if (!fatal) setTimeout(open, 3000); };
+    ws.onclose = () => { packs = null; signals = false; files = null; history = false; failAll(new Error('offline')); h.onState(false, fatal ? 'unauthorized' : undefined); if (!fatal) setTimeout(open, 3000); };
   };
   open();
   const send = (m: object) => ws.readyState === WebSocket.OPEN && (ws.send(JSON.stringify(m)), true);
@@ -74,5 +78,9 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
     ack: (id: number, receipt: string) => send({ op: 'ack', id, receipt }),
     /** Relayed live to whoever else is in the room, never stored. False if not connected or the relay can't. */
     signal: (blob: string) => signals && send({ op: 'signal', blob }),
+    /** Server rooms: the page of messages just before `before`, oldest first. Null if the relay can't (#8). */
+    older: (before: number) => history
+      ? request('older' + before, [{ op: 'before', before }], 30_000).then((m) => m.items as Item[])
+      : Promise.resolve(null),
   };
 }
