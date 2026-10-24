@@ -18,8 +18,8 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
   let signals = false;
   // Whether put/get take `kind: 'file'` (photos, #10); an older relay would file a photo as my character pack.
   let files: boolean | null = null;
-  // Whether the relay pages older history with `before` (#8).
-  let history = false;
+  // Whether the relay pages older history with `before` (#8): null until `ready`, so offline isn't "unsupported".
+  let history: boolean | null = null;
   // put/get replies arrive as op 'stored'/'pack' keyed by hash; error replies echo the hash.
   type Wait = { p: Promise<any>; ok: (m: any) => void; fail: (e: Error) => void };
   const waits = new Map<string, Wait>();
@@ -42,7 +42,7 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
         else if (m.error === 'unknown op') failAll(new Error(m.error)); // relay without pack support
       }
     };
-    ws.onclose = () => { packs = null; signals = false; files = null; history = false; failAll(new Error('offline')); h.onState(false, fatal ? 'unauthorized' : undefined); if (!fatal) setTimeout(open, 3000); };
+    ws.onclose = () => { packs = null; signals = false; files = null; history = null; failAll(new Error('offline')); h.onState(false, fatal ? 'unauthorized' : undefined); if (!fatal) setTimeout(open, 3000); };
   };
   open();
   const send = (m: object) => ws.readyState === WebSocket.OPEN && (ws.send(JSON.stringify(m)), true);
@@ -78,9 +78,9 @@ export function connect(url: string, auth: object, since: () => number, h: Handl
     ack: (id: number, receipt: string) => send({ op: 'ack', id, receipt }),
     /** Relayed live to whoever else is in the room, never stored. False if not connected or the relay can't. */
     signal: (blob: string) => signals && send({ op: 'signal', blob }),
-    /** Server rooms: the page of messages just before `before`, oldest first. Null if the relay can't (#8). */
-    older: (before: number) => history
-      ? request('older' + before, [{ op: 'before', before }], 30_000).then((m) => m.items as Item[])
+    /** Server rooms: the page of messages just before `before`, oldest first. Null if the relay can't (#8); rejects offline. */
+    older: (before: number) => history === null ? Promise.reject(new Error('offline'))
+      : history ? request('older' + before, [{ op: 'before', before }], 30_000).then((m) => m.items as Item[])
       : Promise.resolve(null),
   };
 }
