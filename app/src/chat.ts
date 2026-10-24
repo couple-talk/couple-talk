@@ -62,7 +62,8 @@ async function render(it: Item, live: boolean, older = false): Promise<Payload |
   if (seen.has(it.id)) return null;
   seen.add(it.id);
   lastId = Math.max(lastId, it.id);
-  firstId = Math.min(firstId, it.id);
+  // Only the first load and scroll-up pages move it: a local relay resending an old unacked row must not skip a range.
+  if (older || firstId === Infinity) firstId = Math.min(firstId, it.id);
   let p: Payload;
   try { p = await open<Payload>(room.key, it.blob); } catch { return null; }
   if (!isValid(p)) return null;
