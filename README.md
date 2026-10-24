@@ -107,6 +107,15 @@ npm run tauri build    # 설치 파일 생성 (Windows 빌드는 Windows에서)
 설치 파일은 코드 서명이 되어 있지 않습니다. 처음 실행할 때 Windows는 SmartScreen에서 "추가 정보 → 실행", macOS는 앱을 우클릭한 뒤 "열기"를 선택해야 합니다.
 기본 서버 주소는 빌드할 때 `VITE_DEFAULT_SERVER=wss://도메인`으로 지정할 수 있습니다.
 
+### 릴리스
+
+1. `app/src-tauri/tauri.conf.json`의 `version`을 올리고 main에 머지합니다
+2. `git tag v0.2.0 && git push origin v0.2.0` (태그와 `version`이 다르면 워크플로가 멈춥니다)
+3. Actions의 `release`가 macOS(.dmg, Apple 실리콘·Intel 공용)와 Windows(.msi, .exe) 설치 파일을 초안 Release로 올립니다
+4. 초안을 확인하고 공개하면, 설치된 앱의 설정 화면에 "새 버전 … 설치하고 다시 시작"이 나타납니다
+
+업데이트 파일은 저장소 Secrets의 `TAURI_SIGNING_PRIVATE_KEY`(·`_PASSWORD`)로 서명하고, 앱은 `tauri.conf.json`의 공개 키로 확인합니다. 이 키를 잃어버리면 이미 설치된 앱에 업데이트를 보낼 수 없습니다.
+
 ## 테스트
 
 ```sh
