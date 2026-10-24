@@ -21,7 +21,14 @@ const srv = spawn('node', ['server.js'], {
   env: { ...process.env, PORT, METRICS_PORT, DB_PATH, UPLOADS_MAX: 550 * 1024, UPLOAD_IDLE_MS: 300, HEARTBEAT_MS: 100, FILE_ROOM_MAX: 400 * 1024, EXPIRE_MS: 100 },
   stdio: 'inherit',
 });
-await new Promise((r) => setTimeout(r, 500));
+// A fixed wait lost the race on a slow CI runner (ECONNREFUSED); poll until the relay answers.
+// Each try times out: a process that accepts but never answers would otherwise hang the first fetch for minutes.
+for (let t = Date.now(); !(await fetch(`http://localhost:${PORT}/healthz`, { signal: AbortSignal.timeout(1000) }).then((r) => r.ok, () => false));) {
+  // A relay that died (e.g. EADDRINUSE) fails at once; another process on PORT could otherwise answer for it.
+  if (srv.exitCode !== null || srv.signalCode) throw new Error(`relay exited (${srv.exitCode ?? srv.signalCode}); is port ${PORT} in use?`);
+  if (Date.now() - t > 10_000) { srv.kill(); throw new Error('relay did not start'); }
+  await new Promise((r) => setTimeout(r, 50));
+}
 
 const id = () => randomBytes(32).toString('base64url');
 const receiptOf = (n) => createHash('sha256').update(n).digest('base64url');
