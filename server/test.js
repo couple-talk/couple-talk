@@ -21,7 +21,14 @@ const srv = spawn('node', ['server.js'], {
   env: { ...process.env, PORT, METRICS_PORT, DB_PATH, UPLOADS_MAX: 550 * 1024, UPLOAD_IDLE_MS: 300, HEARTBEAT_MS: 100, FILE_ROOM_MAX: 400 * 1024, EXPIRE_MS: 100 },
   stdio: 'inherit',
 });
-await new Promise((r) => setTimeout(r, 500));
+// A fixed wait lost the race on a slow CI runner (ECONNREFUSED); poll until the relay answers.
+// Each try times out: a process that accepts but never answers would otherwise hang the first fetch for minutes.
+for (let t = Date.now(); !(await fetch(`http://localhost:${PORT}/healthz`, { signal: AbortSignal.timeout(1000) }).then((r) => r.ok, () => false));) {
+  // A relay that died (e.g. EADDRINUSE) fails at once; another process on PORT could otherwise answer for it.
+  if (srv.exitCode !== null || srv.signalCode) throw new Error(`relay exited (${srv.exitCode ?? srv.signalCode}); is port ${PORT} in use?`);
+  if (Date.now() - t > 10_000) { srv.kill(); throw new Error('relay did not start'); }
+  await new Promise((r) => setTimeout(r, 50));
+}
 
 const id = () => randomBytes(32).toString('base64url');
 const receiptOf = (n) => createHash('sha256').update(n).digest('base64url');
@@ -51,6 +58,7 @@ try {
   assert.equal(ready.packs, 2, 'ready advertises the pack upload protocol');
   assert.equal(ready.signals, 1, 'ready advertises signal relaying');
   assert.equal(ready.files, 1, 'ready advertises photo files');
+  assert.equal(ready.history, 1, 'ready advertises loading older history');
   const b = await client({ ...room, device: id() });
   await b.next();
   a.put({ op: 'send', blob: 'CIPHER1', receipt: receiptOf(id()) });
@@ -62,6 +70,28 @@ try {
 
   const c = await client({ ...room, device: id() });
   assert.deepEqual((await c.next()).items.map((m) => m.blob), ['CIPHER1']);
+
+  // older history (#8): the page of messages just before an id, oldest first, server rooms only
+  const hroom = { roomId: id(), token: id() };
+  const h = await client({ ...hroom, device: id() });
+  await h.next();
+  const hid = [];
+  for (let i = 0; i < 5; i++) { h.put({ op: 'send', blob: `H${i}`, receipt: receiptOf(id()) }); hid.push((await h.next()).id); }
+  h.put({ op: 'before', before: hid[4], limit: 2 });
+  assert.deepEqual(await h.next().then((m) => [m.op, m.before, m.items.map((x) => x.blob)]), ['older', hid[4], ['H2', 'H3']]);
+  h.put({ op: 'before', before: hid[2], limit: 500 });
+  assert.deepEqual((await h.next()).items.map((x) => x.blob), ['H0', 'H1']);
+  h.put({ op: 'before', before: hid[0] });
+  assert.deepEqual((await h.next()).items, [], 'nothing before the first message');
+  h.put({ op: 'before', before: 'x' });
+  assert.deepEqual(await h.next(), { op: 'error', error: 'bad request', before: 'x' }, 'errors echo `before`');
+  h.put({ op: 'before', before: 1e9, limit: 501 });
+  assert.equal((await h.next()).error, 'bad request', 'pages are capped');
+  const outside = await client({ roomId: id(), token: id(), device: id() });
+  await outside.next();
+  outside.put({ op: 'before', before: hid[4] });
+  assert.deepEqual((await outside.next()).items, [], 'older history is room-scoped');
+  for (const ws of [h, outside]) ws.close();
 
   // local mode: undelivered kept, acked deleted
   const lroom = { roomId: id(), token: id(), mode: 'local' };
@@ -84,6 +114,8 @@ try {
   await new Promise((r) => setTimeout(r, 100));
   const lb2 = await client({ ...lroom, device: devB });
   assert.deepEqual((await lb2.next()).items, []);
+  lb2.put({ op: 'before', before: 1e9 });
+  assert.equal((await lb2.next()).error, 'bad request', 'local rooms keep history on each PC, not here');
 
   // oversized frame must not take the relay down
   const big = new WebSocket(`ws://localhost:${PORT}`);

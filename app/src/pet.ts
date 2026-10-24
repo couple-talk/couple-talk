@@ -1,8 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { emit, emitTo } from '@tauri-apps/api/event';
-import { currentMonitor, getCurrentWindow, LogicalPosition, LogicalSize, Window, type Monitor } from '@tauri-apps/api/window';
+import { CheckMenuItem, Menu, MenuItem, PredefinedMenuItem } from '@tauri-apps/api/menu';
+import { availableMonitors, currentMonitor, getCurrentWindow, LogicalPosition, LogicalSize, primaryMonitor, Window, type Monitor } from '@tauri-apps/api/window';
 import { loadPack, type Who } from './pack';
-import { STATUSES } from './protocol';
+import { ACTIONS, STATUSES } from './protocol';
 import type { PetEvent } from './tauri';
 
 // Packs only supply poses (docs/character-pack.md); every motion and effect lives here.
@@ -19,6 +20,8 @@ const REACTIONS: Record<string, Reaction> = {
   'poke:hit': { pose: 'poke_hit', anim: 'shake', emoji: '❗' },
   hug: { pose: 'hug', anim: 'squish', emoji: '🤗' },
   'hug:hit': { pose: 'hug', anim: 'squish', emoji: '🤗' },
+  // Played locally when the two pets walk into each other; nothing is sent.
+  meet: { pose: 'hug', anim: 'squish', emoji: '💕' },
 };
 
 const pet = document.getElementById('pet')!;
@@ -79,14 +82,27 @@ const BIG = { w: 220, h: 220 };
 // which can still be the old monitor's right after a drop, and that put pets off screen between 1x and 2x monitors.
 type Area = { x: number; y: number; w: number; h: number };
 const toArea = ({ workArea: { position: p, size: s }, scaleFactor: f }: Monitor): Area => ({ x: p.x / f, y: p.y / f, w: s.width / f, h: s.height / f });
-let area = toArea((await currentMonitor())!);
+// Where each pet last stood (#6): its monitor's position and the offset from the work area. Monitors are matched by
+// position, not name (two identical monitors share a name) nor work area (it moves with the Dock or taskbar).
+// A missing monitor falls back to the primary one.
+type Spot = { mx: number; my: number; dx: number };
+const SPOT_KEY = `ct.petSpot.${who}`;
+const spot: Spot | null = stored(SPOT_KEY);
+let monitor = (await availableMonitors()).find((m) => m.position.x === spot?.mx && m.position.y === spot?.my)
+  ?? (await primaryMonitor()) ?? (await currentMonitor())!;
+const restored = !!spot && monitor.position.x === spot.mx && monitor.position.y === spot.my;
+let area = toArea(monitor);
 let size = SMALL;
 // x is the character's center, so resizing the window around it doesn't move the character.
 const half = () => size.w / 2;
 const minX = () => area.x + half();
 const maxX = () => area.x + area.w - half();
 // Start apart: mine left of center, the partner's near the right edge.
-let x = who === 'me' ? area.x + area.w / 2 - 80 : maxX() - 40;
+let x = restored ? Math.min(Math.max(area.x + spot!.dx, minX()), maxX()) : who === 'me' ? area.x + area.w / 2 - 80 : maxX() - 40;
+const saveSpot = () => localStorage.setItem(SPOT_KEY, JSON.stringify({ mx: monitor.position.x, my: monitor.position.y, dx: x - area.x } satisfies Spot));
+// Shared by both pets through localStorage, so turning it off on one stops both.
+const STILL_KEY = 'ct.petStill';
+const still = () => localStorage.getItem(STILL_KEY) === '1';
 let dir = -1;
 // While dragging, the pointer owns the window position.
 let drag: { sx: number; sy: number; cx: number; cy: number; moved: boolean; win: { x: number; y: number } | null } | null = null;
@@ -116,12 +132,14 @@ let reactPose = '';
 let reactUntil = 0;
 let statusPose = '';
 let statusUntil = 0;
+let metAt = 0;
 
 setInterval(() => {
   if (++ticks % 5 === 0) emitTo(otherPet, 'pet-pos', { x, half: half(), floor: floorKey(), shown } satisfies PetPos).catch(() => {});
+  if (ticks % 100 === 0 && !drag) checkFloor();
   if (!shown) return; // hidden partner window: x stays frozen with it, so show() does not jump
   const now = Date.now();
-  const walking = now > pauseUntil && now > reactUntil && now > statusUntil;
+  const walking = now > pauseUntil && now > reactUntil && now > statusUntil && !still();
   // Standing still shows the owner's status pose (#12), so a glance at the pet tells what they're up to.
   const next = now < reactUntil ? reactPose : now < statusUntil ? statusPose : walking ? 'walk' : statusPose || 'idle';
   if (next !== pose) { pose = next; frame = 0; draw(); }
@@ -130,7 +148,12 @@ setInterval(() => {
   if (Math.random() < 0.005) { pauseUntil = now + 2000 + Math.random() * 6000; return; }
   if (Math.random() < 0.003) dir = -dir;
   const p = peer && Date.now() - peer.at < 1000 && peer.floor === floorKey() ? peer : null;
-  if (p && Math.abs(p.x - x) < p.half + half() + 20 && Math.sign(p.x - x) === dir) dir = -dir;
+  if (p && Math.abs(p.x - x) < p.half + half() + 20 && Math.sign(p.x - x) === dir) {
+    // Now and then they greet each other, still facing, before turning back.
+    if (now - metAt > 60_000 && Math.random() < 0.3) { metAt = now; react(REACTIONS.meet); }
+    dir = -dir;
+    return;
+  }
   x += dir * manifest.speed;
   const min = minX(), max = maxX();
   if (x <= min || x >= max) { dir = -dir; x = Math.min(Math.max(x, min), max); }
@@ -138,6 +161,19 @@ setInterval(() => {
   place();
 }, 50);
 place();
+
+// Every few seconds: remember where we stand, and walk back onto a real monitor if ours was unplugged.
+async function checkFloor() {
+  const same = (await availableMonitors()).find((m) => m.position.x === monitor.position.x && m.position.y === monitor.position.y);
+  const next = same ?? (await primaryMonitor());
+  if (!next) return;
+  monitor = next;
+  // Also picks up a moved Dock or taskbar on the same monitor.
+  area = toArea(next);
+  x = Math.min(Math.max(x, minX()), maxX());
+  await place(); // a standing-still pet has no walk tick to follow a moved Dock or taskbar
+  saveSpot();
+}
 
 function heart(cls: string, left: number, top: number, delay: number, dx = 0) {
   const h = document.createElement('span');
@@ -222,7 +258,8 @@ const DRAG_PX = 4;
 let dragged = false;
 let following = false;
 pet.onpointerdown = async (e) => {
-  if (e.button !== 0) return;
+  // Ctrl-click on macOS is a right-click; its menu swallows the pointerup and would leave the drag stuck.
+  if (e.button !== 0 || e.ctrlKey) return;
   pet.setPointerCapture(e.pointerId);
   const d: NonNullable<typeof drag> = { sx: e.screenX, sy: e.screenY, cx: e.screenX, cy: e.screenY, moved: false, win: null };
   drag = d;
@@ -257,15 +294,38 @@ pet.onpointerup = pet.onpointercancel = async () => {
   // Land on the floor of whichever monitor the OS says the window ended up on, and stand there a moment.
   while (following) await new Promise((r) => requestAnimationFrame(r));
   const m = await currentMonitor();
-  if (m) area = toArea(m);
+  if (m) { monitor = m; area = toArea(m); }
   x = Math.min(Math.max(d.win.x + d.cx - d.sx + half(), minX()), maxX());
+  saveSpot();
   await place();
 };
 
-pet.onclick = async () => {
-  if (dragged) { dragged = false; return; }
+async function openChat() {
   const main = await Window.getByLabel('main');
   await main?.show();
   await main?.unminimize();
   await main?.setFocus();
+}
+pet.onclick = () => {
+  if (dragged) { dragged = false; return; }
+  openChat();
+};
+
+// Right-click (#6): send an action without opening the chat. The main window holds the connection and sends it.
+// A native menu, since the pet window is too small to hold one.
+// Built once: each Menu.new holds native resources until closed.
+const MENU_LABELS: Record<keyof typeof ACTIONS, string> = { poke: '콕 찌르기', heart: '하트 보내기', hug: '안아주기' };
+const stillItem = await CheckMenuItem.new({ text: '한자리에 가만히 있기', checked: still(),
+  action: () => localStorage.setItem(STILL_KEY, still() ? '0' : '1') });
+const menu = await Menu.new({ items: [
+  ...await Promise.all(Object.entries(ACTIONS).map(([kind, [emoji]]) =>
+    MenuItem.new({ text: `${emoji} ${MENU_LABELS[kind as keyof typeof ACTIONS]}`, action: () => emitTo('main', 'pet-send', kind) }))),
+  await PredefinedMenuItem.new({ item: 'Separator' }),
+  await MenuItem.new({ text: '💬 채팅 열기', action: openChat }),
+  stillItem,
+] });
+pet.oncontextmenu = async (e) => {
+  e.preventDefault();
+  await stillItem.setChecked(still()); // the other pet's menu may have changed it
+  await menu.popup();
 };

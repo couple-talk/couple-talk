@@ -58,6 +58,13 @@ export async function petListen(onHello: () => void) {
   await listen('pet-hello', onHello);
 }
 
+/** An action picked from a pet's right-click menu (#6), for the main window to send. */
+export async function onPetSend(send: (kind: string) => void) {
+  if (!isTauri) return;
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
+  await getCurrentWindow().listen<string>('pet-send', ({ payload }) => send(payload));
+}
+
 /** The installed version and, if GitHub Releases has a newer one (#11), a way to install it and restart. */
 export async function checkUpdate(): Promise<{ current: string; next?: string; install?: () => Promise<void> } | null> {
   if (!isTauri) return null;
