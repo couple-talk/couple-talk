@@ -30,7 +30,6 @@ bindForm('#nick-form', async (f) => {
   if (nick === load<string | null>('ct.partner', null)) throw new Error('상대와 같은 닉네임은 쓸 수 없어요');
   const pastNicks = [...new Set([...(config!.pastNicks ?? []), config!.nick])].filter((n) => n !== nick);
   setConfig({ ...config!, nick, pastNicks });
-  $('#me').textContent = nick;
   petEmit({ type: 'reload' }); // the pet's name tag
   return '바꿨어요';
 });
@@ -51,6 +50,7 @@ async function refreshUpdate() {
   $('#app-version').textContent = u.current;
   const b = $<HTMLButtonElement>('#update');
   b.hidden = !u.install;
+  $('#show-settings').classList.toggle('dot', !!u.install);
   if (!u.install) return;
   b.disabled = false;
   b.textContent = `새 버전 ${u.next} 설치하고 다시 시작`;
