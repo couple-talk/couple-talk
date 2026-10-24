@@ -58,6 +58,18 @@ export async function petListen(onHello: () => void) {
   await listen('pet-hello', onHello);
 }
 
+/** The installed version and, if GitHub Releases has a newer one (#11), a way to install it and restart. */
+export async function checkUpdate(): Promise<{ current: string; next?: string; install?: () => Promise<void> } | null> {
+  if (!isTauri) return null;
+  const [{ getVersion }, { check }, { relaunch }] = await Promise.all([
+    import('@tauri-apps/api/app'), import('@tauri-apps/plugin-updater'), import('@tauri-apps/plugin-process')]);
+  const current = await getVersion();
+  // No release yet, offline or GitHub down: just show the version.
+  const update = await check().catch(() => null);
+  if (!update) return { current };
+  return { current, next: update.version, install: async () => { await update.downloadAndInstall(); await relaunch(); } };
+}
+
 /** Closing the main window only hides it so the connection and pet keep running. */
 export async function setupMainWindow() {
   if (!isTauri) return;

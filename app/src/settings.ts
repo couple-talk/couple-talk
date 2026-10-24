@@ -3,7 +3,7 @@ import { unwrapSecret, wrapSecret } from './crypto';
 import { secretBytes } from './chat';
 import { bindForm, bindReset, loadDeviceKey } from './setup';
 import { $, config, load, setConfig } from './state';
-import { isTauri, petEmit } from './tauri';
+import { checkUpdate, isTauri, petEmit } from './tauri';
 
 const dialog = $<HTMLDialogElement>('#settings-dialog');
 
@@ -38,8 +38,23 @@ $<HTMLInputElement>('#hide-pet-text').onchange = (e) => setConfig({ ...config!, 
 $<HTMLInputElement>('#notify-text').onchange = (e) => setConfig({ ...config!, notifyText: (e.currentTarget as HTMLInputElement).checked });
 $<HTMLInputElement>('#tap-to-view').onchange = (e) => setConfig({ ...config!, tapToView: (e.currentTarget as HTMLInputElement).checked });
 $<HTMLInputElement>('#off-at').onchange = (e) => setConfig({ ...config!, offAt: (e.currentTarget as HTMLInputElement).value || undefined });
-// Notifications, the tray and the shortcut only exist in the desktop app.
-$('#notify-text').closest('label')!.hidden = $('#shortcut-hint').hidden = !isTauri;
+// Notifications, the tray, the shortcut and updates only exist in the desktop app.
+$('#notify-text').closest('label')!.hidden = $('#shortcut-hint').hidden = $('#version-line').hidden = !isTauri;
+
+// Checked once per launch; installing restarts the app into the new version.
+checkUpdate().then((u) => {
+  if (!u) return;
+  $('#app-version').textContent = u.current;
+  if (!u.install) return;
+  const b = $<HTMLButtonElement>('#update');
+  b.textContent = `새 버전 ${u.next} 설치하고 다시 시작`;
+  b.hidden = false;
+  b.onclick = async () => {
+    b.disabled = true;
+    b.textContent = '받는 중…';
+    try { await u.install!(); } catch (e) { b.disabled = false; b.textContent = `설치하지 못했어요 (${(e as Error).message}). 다시 시도`; }
+  };
+});
 
 bindForm('#pin-form', async (f) => {
   const pin = String(f.get('pin'));
