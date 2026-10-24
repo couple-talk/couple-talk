@@ -23,7 +23,9 @@ const srv = spawn('node', ['server.js'], {
 });
 // A fixed wait lost the race on a slow CI runner (ECONNREFUSED); poll until the relay answers.
 for (let t = Date.now(); !(await fetch(`http://localhost:${PORT}/healthz`).then((r) => r.ok, () => false));) {
-  if (Date.now() - t > 10_000) throw new Error('relay did not start');
+  // A relay that died (e.g. EADDRINUSE) fails at once; another process on PORT could otherwise answer for it.
+  if (srv.exitCode !== null || srv.signalCode) throw new Error(`relay exited (${srv.exitCode ?? srv.signalCode}); is port ${PORT} in use?`);
+  if (Date.now() - t > 10_000) { srv.kill(); throw new Error('relay did not start'); }
   await new Promise((r) => setTimeout(r, 50));
 }
 
