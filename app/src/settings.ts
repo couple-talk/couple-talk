@@ -3,7 +3,7 @@ import { unwrapSecret, wrapSecret } from './crypto';
 import { secretBytes } from './chat';
 import { bindForm, bindReset, loadDeviceKey } from './setup';
 import { $, config, load, setConfig } from './state';
-import { isTauri, petEmit } from './tauri';
+import { checkUpdate, isTauri, petEmit } from './tauri';
 
 const dialog = $<HTMLDialogElement>('#settings-dialog');
 
@@ -17,6 +17,7 @@ $('#show-settings').onclick = () => {
   $('#set-mode').textContent = config!.mode === 'server' ? '서버 (암호문 보관)' : '각자 PC에만';
   dialog.querySelectorAll('.error').forEach((e) => (e.textContent = ''));
   dialog.showModal();
+  refreshUpdate(); // the app lives in the tray for weeks, so launch alone is too rare
 };
 
 // The old name is kept as still mine for messages without a person id (from before #7 or from an older app),
@@ -38,8 +39,32 @@ $<HTMLInputElement>('#hide-pet-text').onchange = (e) => setConfig({ ...config!, 
 $<HTMLInputElement>('#notify-text').onchange = (e) => setConfig({ ...config!, notifyText: (e.currentTarget as HTMLInputElement).checked });
 $<HTMLInputElement>('#tap-to-view').onchange = (e) => setConfig({ ...config!, tapToView: (e.currentTarget as HTMLInputElement).checked });
 $<HTMLInputElement>('#off-at').onchange = (e) => setConfig({ ...config!, offAt: (e.currentTarget as HTMLInputElement).value || undefined });
-// Notifications, the tray and the shortcut only exist in the desktop app.
-$('#notify-text').closest('label')!.hidden = $('#shortcut-hint').hidden = !isTauri;
+// Notifications, the tray, the shortcut and updates only exist in the desktop app.
+$('#notify-text').closest('label')!.hidden = $('#shortcut-hint').hidden = $('#version-line').hidden = !isTauri;
+
+// Checked at launch and whenever settings open; installing restarts the app into the new version.
+let installing = false;
+async function refreshUpdate() {
+  if (installing) return;
+  const u = await checkUpdate();
+  if (!u || installing) return;
+  $('#app-version').textContent = u.current;
+  const b = $<HTMLButtonElement>('#update');
+  b.hidden = !u.install;
+  if (!u.install) return;
+  b.disabled = false;
+  b.textContent = `새 버전 ${u.next} 설치하고 다시 시작`;
+  b.onclick = async () => {
+    installing = b.disabled = true;
+    b.textContent = '받는 중…';
+    try { await u.install!(); } catch (e) {
+      installing = b.disabled = false;
+      // Plugin errors arrive as plain strings, not Error objects.
+      b.textContent = `설치하지 못했어요 (${e instanceof Error ? e.message : String(e)}). 다시 시도`;
+    }
+  };
+}
+refreshUpdate();
 
 bindForm('#pin-form', async (f) => {
   const pin = String(f.get('pin'));

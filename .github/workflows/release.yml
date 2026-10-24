@@ -1,0 +1,59 @@
+name: release
+
+# Pushing a tag like v0.2.0 builds the installers and a draft GitHub Release (#11).
+# Publishing the draft is what makes installed apps see the update: the updater reads releases/latest.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    name: release (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            os: macos-latest
+            # One .dmg for Apple silicon and Intel Macs.
+            args: --target universal-apple-darwin
+          - platform: windows
+            os: windows-latest
+            args: ''
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the app version
+        shell: bash
+        run: |
+          v=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME but tauri.conf.json says $v"; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+      - run: npm ci
+        working-directory: app
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update bundles so installed apps accept them; the public key is in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: couple-talk ${{ github.ref_name }}
+          releaseBody: 코드 서명 전이라 첫 실행 때 경고가 뜹니다. 여는 방법은 README의 "앱 빌드" 절에 있습니다.
+          releaseDraft: true
+          # Local builds skip updater bundles (they need the private key); releases merge them in.
+          args: ${{ matrix.args }} --config src-tauri/release.conf.json

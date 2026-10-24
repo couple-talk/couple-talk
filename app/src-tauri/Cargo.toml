@@ -19,12 +19,17 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 keyring = "4"
+# generate_context! embeds the `plugins` config (the updater, #11) as serde_json values.
+serde_json = "1"
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-notification = "2"
 
 # Desktop only (#5); the mobile app (#17) has its own way to hide and to notify.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
+# Updates from GitHub Releases (#11); process restarts into the installed version.
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
 # OS idle time for away detection (#12). No default features: x11 is Linux-only and we build macOS and Windows.
 user-idle = { version = "0.6", default-features = false }
 
