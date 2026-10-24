@@ -28,7 +28,6 @@ export async function start(secret: Bytes) {
   // The first nickname, not the current one: a rename on one of my PCs doesn't reach the others.
   if (!config!.person) setConfig({ ...config!, person: await legacyPerson(secret, config!.pastNicks?.[0] ?? config!.nick) });
   show('chat');
-  $('#me').textContent = config!.nick;
   startPresence();
   if (config!.mode === 'local') for (const it of await itemsBefore(Infinity, PAGE)) await render(it, false);
 
@@ -163,6 +162,13 @@ $<HTMLFormElement>('#send-form').onsubmit = async (e) => {
   if (!input.value.trim()) return;
   if (await sendPayload({ type: 'chat', text: input.value })) input.value = '';
 };
+
+// The tray holds actions and statuses (#58); picking one closes it again.
+const tray = $('#tray');
+const trayButton = $('#toggle-tray');
+const setTray = (open: boolean) => { tray.hidden = !open; trayButton.setAttribute('aria-expanded', String(open)); };
+trayButton.onclick = () => setTray(tray.hidden !== false);
+tray.addEventListener('click', (e) => { if ((e.target as Element).closest('button')) setTray(false); });
 
 $('#actions').append(...Object.entries(ACTIONS).map(([kind, [emoji, label]]) => {
   const b = document.createElement('button');
