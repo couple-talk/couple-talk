@@ -85,7 +85,7 @@ export function bindReset(id: string) {
     localStorage.removeItem('ct.history');
     localStorage.removeItem('ct.partner');
     localStorage.removeItem('ct.presence');
-    for (const db of ['ct-packs', 'ct-files'])
+    for (const db of ['ct-packs', 'ct-files', 'ct-history'])
       await new Promise((done) => { const r = indexedDB.deleteDatabase(db); r.onsuccess = r.onerror = r.onblocked = done; });
     // Awaited so the pets drop the old name tags and characters before this page navigates away.
     await petEmit({ type: 'reload' }).catch(() => {});
