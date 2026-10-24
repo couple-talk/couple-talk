@@ -41,6 +41,7 @@ export async function start(secret: Bytes) {
       for (const it of items) await receive(it, false, mode);
       for (const who of ['me', 'partner'] as const) { const w = wanted[who]; if (w) applyCharacter(who, w.pack, w.id); }
       connected();
+      loadOlder(); // already at the top while offline: no scroll event will come to retry
     },
     onMsg: (it) => receive(it, true, config!.mode),
     onSignal: receiveSignal,
@@ -62,8 +63,9 @@ async function render(it: Item, live: boolean, older = false): Promise<Payload |
   if (seen.has(it.id)) return null;
   seen.add(it.id);
   lastId = Math.max(lastId, it.id);
-  // Only the first load and scroll-up pages move it: a local relay resending an old unacked row must not skip a range.
-  if (older || firstId === Infinity) firstId = Math.min(firstId, it.id);
+  // Only the first load moves it here (scroll-up pages move it in loadOlder): a local relay resending an old
+  // unacked row must not skip a range.
+  if (firstId === Infinity) firstId = it.id;
   let p: Payload;
   try { p = await open<Payload>(room.key, it.blob); } catch { return null; }
   if (!isValid(p)) return null;
@@ -131,8 +133,8 @@ export function petAway(who: Who, away: boolean) {
 // Scrolling near the top loads the page before the oldest row, keeping the rows in view where they were.
 let paging = false;
 let atStart = false;
-$('#messages').addEventListener('scroll', async (e) => {
-  const list = e.currentTarget as HTMLElement;
+async function loadOlder() {
+  const list = $('#messages');
   if (paging || atStart || list.scrollTop > 80 || firstId === Infinity) return;
   paging = true;
   try {
@@ -141,9 +143,12 @@ $('#messages').addEventListener('scroll', async (e) => {
     if (!items?.length) { atStart = true; return; }
     const height = list.scrollHeight;
     for (const it of items.reverse()) await render(it, false, true);
+    // From the page, not render(): a row already drawn (a resent local one) is skipped there and would stall the cursor.
+    firstId = Math.min(firstId, items[items.length - 1].id);
     list.scrollTop += list.scrollHeight - height;
   } finally { paging = false; }
-});
+}
+$('#messages').addEventListener('scroll', loadOlder);
 
 export async function sendPayload(p: Record<string, unknown>) {
   const n = randomId();
