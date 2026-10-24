@@ -171,7 +171,7 @@ async function checkFloor() {
   // Also picks up a moved Dock or taskbar on the same monitor.
   area = toArea(next);
   x = Math.min(Math.max(x, minX()), maxX());
-  if (!same) await place();
+  await place(); // a standing-still pet has no walk tick to follow a moved Dock or taskbar
   saveSpot();
 }
 
