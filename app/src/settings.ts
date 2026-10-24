@@ -17,6 +17,7 @@ $('#show-settings').onclick = () => {
   $('#set-mode').textContent = config!.mode === 'server' ? '서버 (암호문 보관)' : '각자 PC에만';
   dialog.querySelectorAll('.error').forEach((e) => (e.textContent = ''));
   dialog.showModal();
+  refreshUpdate(); // the app lives in the tray for weeks, so launch alone is too rare
 };
 
 // The old name is kept as still mine for messages without a person id (from before #7 or from an older app),
@@ -41,20 +42,29 @@ $<HTMLInputElement>('#off-at').onchange = (e) => setConfig({ ...config!, offAt: 
 // Notifications, the tray, the shortcut and updates only exist in the desktop app.
 $('#notify-text').closest('label')!.hidden = $('#shortcut-hint').hidden = $('#version-line').hidden = !isTauri;
 
-// Checked once per launch; installing restarts the app into the new version.
-checkUpdate().then((u) => {
-  if (!u) return;
+// Checked at launch and whenever settings open; installing restarts the app into the new version.
+let installing = false;
+async function refreshUpdate() {
+  if (installing) return;
+  const u = await checkUpdate();
+  if (!u || installing) return;
   $('#app-version').textContent = u.current;
-  if (!u.install) return;
   const b = $<HTMLButtonElement>('#update');
+  b.hidden = !u.install;
+  if (!u.install) return;
+  b.disabled = false;
   b.textContent = `새 버전 ${u.next} 설치하고 다시 시작`;
-  b.hidden = false;
   b.onclick = async () => {
-    b.disabled = true;
+    installing = b.disabled = true;
     b.textContent = '받는 중…';
-    try { await u.install!(); } catch (e) { b.disabled = false; b.textContent = `설치하지 못했어요 (${(e as Error).message}). 다시 시도`; }
+    try { await u.install!(); } catch (e) {
+      installing = b.disabled = false;
+      // Plugin errors arrive as plain strings, not Error objects.
+      b.textContent = `설치하지 못했어요 (${e instanceof Error ? e.message : String(e)}). 다시 시도`;
+    }
   };
-});
+}
+refreshUpdate();
 
 bindForm('#pin-form', async (f) => {
   const pin = String(f.get('pin'));
