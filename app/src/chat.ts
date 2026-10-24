@@ -8,7 +8,7 @@ import type { Who } from './pack';
 import { awayOf, connected, looking, receiveSignal, rendered, startPresence } from './presence';
 import { ACTIONS, isValid, type Mode, type Payload } from './protocol';
 import { $, config, isMe, load, save, setConfig, show } from './state';
-import { notify, petEmit, petListen, type PetEvent } from './tauri';
+import { notify, onPetSend, petEmit, petListen, type PetEvent } from './tauri';
 
 // Rendered at start and per scroll-up page; matches the relay's HISTORY_LIMIT so both modes page alike.
 const PAGE = 500;
@@ -171,6 +171,15 @@ $('#actions').append(...Object.entries(ACTIONS).map(([kind, [emoji, label]]) => 
   b.onclick = () => sendPayload({ type: 'action', kind });
   return b;
 }));
+
+// Locked or offline, nothing goes out: bring the window up so the unlock screen or the send error is what the user sees.
+onPetSend(async (kind) => {
+  if (!Object.hasOwn(ACTIONS, kind)) return;
+  if (net && (await sendPayload({ type: 'action', kind }))) return;
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
+  const win = getCurrentWindow();
+  await win.show(); await win.unminimize(); await win.setFocus();
+});
 
 petListen(() => {
   // The status, or 💤 over it while that side is away: a pet window can (re)start mid-absence.
