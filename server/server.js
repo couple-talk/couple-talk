@@ -61,6 +61,7 @@ const q = {
   addRoom: db.prepare('INSERT INTO rooms (id, token_hash, mode) VALUES (?, ?, ?)'),
   add: db.prepare('INSERT INTO messages (room_id, sender, ts, blob, receipt) VALUES (?, ?, ?, ?, ?) RETURNING id'),
   since: db.prepare('SELECT id, ts, blob FROM messages WHERE room_id = ? AND id > ? ORDER BY id DESC LIMIT ?'),
+  before: db.prepare('SELECT id, ts, blob FROM messages WHERE room_id = ? AND id < ? ORDER BY id DESC LIMIT ?'),
   pending: db.prepare('SELECT id, ts, blob FROM messages WHERE room_id = ? AND sender != ? ORDER BY id'),
   ack: db.prepare('DELETE FROM messages WHERE room_id = ? AND id = ? AND sender != ? AND receipt = ?'),
   putPack: db.prepare('INSERT OR REPLACE INTO packs (room_id, sender, hash, ts, blob) VALUES (?, ?, ?, ?, ?)'),
@@ -120,7 +121,8 @@ function auth(ws, m) {
   // packs: version of the pack upload protocol (2 = ordered parts). Clients check it before uploading.
   // signals: the `signal` op is relayed. Older relays answer it with 'unknown op', which fails pending pack transfers.
   // files: put/get accept `kind: 'file'` (photos). Older relays would store a photo as the sender's character pack.
-  ws.send(JSON.stringify({ op: 'ready', v: 1, mode: room.mode, items, packs: 2, signals: 1, files: 1 }));
+  // history: the `before` op pages through older messages in server rooms (#8).
+  ws.send(JSON.stringify({ op: 'ready', v: 1, mode: room.mode, items, packs: 2, signals: 1, files: 1, history: 1 }));
 }
 
 /** Per-socket, per-minute budget; `kind` keeps signals from eating into the message budget. */
@@ -180,6 +182,13 @@ function handle(ws, m) {
     }
     const row = q.getPack.get(ws.roomId, m.hash);
     ws.send(JSON.stringify({ op: 'pack', hash: m.hash, blob: row?.blob ?? null }));
+  } else if (m.op === 'before') {
+    // Scrolling up in server rooms (#8). Local rooms only hold undelivered messages; their history lives on each PC.
+    const limit = m.limit ?? HISTORY_LIMIT;
+    if (ws.mode !== 'server' || !Number.isInteger(m.before) || !Number.isInteger(limit) || limit < 1 || limit > HISTORY_LIMIT) return 'bad request';
+    if (limited(ws, 'history')) return 'rate limited';
+    if (ws.bufferedAmount > SEND_BUFFER_MAX) return 'busy';
+    ws.send(JSON.stringify({ op: 'older', before: m.before, items: q.before.all(ws.roomId, m.before, limit).reverse() }));
   } else if (m.op === 'signal') {
     // Sealed like a message, so the relay can't tell a heartbeat from a read mark. Only peers online right now get it.
     if (typeof m.blob !== 'string' || m.blob.length > SIGNAL_MAX) return 'bad request';
@@ -235,9 +244,10 @@ wss.on('connection', (ws) => {
   ws.on('message', (data) => {
     let err, m;
     try { m = JSON.parse(data); err = handle(ws, m); } catch { err = 'bad request'; }
-    // Echo the hash so a client can tell which pack request failed.
+    // Echo the hash (or `before`) so a client can tell which pack or history request failed.
     const hash = typeof m?.hash === 'string' ? m.hash : undefined;
-    if (err) { ws.send(JSON.stringify({ op: 'error', error: err, hash })); if (!ws.roomId) ws.close(); }
+    const before = m?.op === 'before' ? m.before : undefined;
+    if (err) { ws.send(JSON.stringify({ op: 'error', error: err, hash, before })); if (!ws.roomId) ws.close(); }
   });
   ws.on('close', () => {
     dropUpload(ws);
