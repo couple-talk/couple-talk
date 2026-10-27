@@ -102,6 +102,8 @@ export function connected() {
 }
 
 export function startPresence() {
+  // The pet and dock badges outlive a reload of this window (lock, setup), while `unread` restarts at 0.
+  setUnread(0);
   showPresence();
   setInterval(beat, BEAT_MS);
   setInterval(showPresence, 5_000);
