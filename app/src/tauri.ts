@@ -22,7 +22,8 @@ export type PetEvent =
   | { type: 'reload' }
   | { type: 'chat'; from: Who; text?: string }
   | { type: 'status'; emoji: string; pose?: string; from: Who }
-  | { type: 'action'; kind: string; from: Who };
+  | { type: 'action'; kind: string; from: Who }
+  | { type: 'unread'; n: number };
 
 export async function petEmit(e: PetEvent) {
   if (!isTauri) return;
@@ -30,8 +31,10 @@ export async function petEmit(e: PetEvent) {
   await Promise.all(['pet', 'pet-me'].map((w) => emitTo(w, 'pet', e)));
 }
 
-/** Unread partner messages, shown as a badge on the dock/taskbar and a dot on the tray icon (#5). */
+/** Unread partner messages, shown as a badge on the dock/taskbar and a dot on the tray icon (#5),
+ * and as `💬 n` on the partner pet (#26) so a bubble that already faded isn't missed. */
 export async function setUnread(n: number) {
+  await petEmit({ type: 'unread', n });
   if (!isTauri) return;
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('set_unread', { n });

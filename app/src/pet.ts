@@ -234,6 +234,11 @@ await win.listen<PetEvent>('pet', async ({ payload: e }) => {
     await showIdentity();
     return;
   }
+  // Partner messages I haven't looked at (#26): the badge outlives the bubble and clears when the chat gets focus.
+  if (e.type === 'unread') {
+    document.getElementById('badge')!.textContent = who === 'partner' && e.n ? `💬 ${e.n}` : '';
+    return;
+  }
   if (e.from !== who && e.type !== 'action') return;
   if (e.type === 'status') {
     document.getElementById('status')!.textContent = e.emoji;

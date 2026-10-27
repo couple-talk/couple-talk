@@ -12,6 +12,9 @@
       #pet.left #body { transform: scaleX(-1); }
       #pet::before { content: ''; position: absolute; left: 22%; right: 22%; bottom: 3px; height: 8px; border-radius: 50%; background: #0002; }
       #status { position: absolute; right: -6px; top: 4px; font-size: 22px; }
+      #badge { position: absolute; left: -8px; top: 4px; font: 600 11px system-ui, sans-serif; color: #2b2124; background: #fffd;
+        border-radius: 8px; padding: 1px 5px; white-space: nowrap; box-shadow: 0 1px 3px #0003; }
+      #badge:empty { display: none; }
       #bubble { position: absolute; left: 50%; bottom: calc(100% + 4px); transform: translateX(-50%); background: #fff; border-radius: 12px;
         padding: 2px 8px; font-size: 20px; box-shadow: 0 1px 4px #0003; opacity: 0; transition: opacity .2s; }
       #bubble.on { opacity: 1; }
@@ -40,6 +43,7 @@
     <div id="pet">
       <img id="body" alt="" draggable="false" />
       <span id="status"></span>
+      <span id="badge"></span>
       <span id="bubble"></span>
       <span id="tag"></span>
     </div>
